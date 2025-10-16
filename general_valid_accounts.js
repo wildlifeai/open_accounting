@@ -15,9 +15,36 @@ function updateAccountValidation() {
     .filter(account => account && account !== "*Account");
   Logger.log(`Found ${validAccounts.length} valid accounts`);
 
-  // Get the current spreadsheet and find Budget sheet
+  // Get the current spreadsheet and find Budget and Submitted_budget sheets
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   const budgetSheet = spreadsheet.getSheetByName("Budget");  
+  const submittedBudgetSheet = spreadsheet.getSheetByName("Submitted_budget");
+
+  // Copy the valid account values
+  if (submittedBudgetSheet) {
+    Logger.log("Processing 'Submitted_budget' sheet...");
+
+    // Add the new total account value to the end of the list
+    const accountsForSubmittedBudget = [...validAccounts, "Total expenses without GST"];
+    Logger.log("Added 'Total expenses without GST' to the list.");
+
+    // Prepare data for writing (needs to be a 2D array)
+    const valuesToWrite = accountsForSubmittedBudget.map(account => [account]);
+
+    // Clear existing values from A3 downwards
+    const clearRange = submittedBudgetSheet.getRange("A3:A");
+    Logger.log("Clearing existing data from A3 downwards in 'Submitted_budget'.");
+    clearRange.clearContent();
+
+    // Write the new values starting from A3
+    if (valuesToWrite.length > 0) {
+      const targetRange = submittedBudgetSheet.getRange(3, 1, valuesToWrite.length, 1);
+      Logger.log(`Writing ${valuesToWrite.length} new values to A3 downwards.`);
+      targetRange.setValues(valuesToWrite);
+    }
+  } else {
+    Logger.log("Sheet 'Submitted_budget' not found. Skipping.");
+  }
   
   // Update budgetsheet data range
   if (!budgetSheet) {
