@@ -20,7 +20,7 @@ const PRIVATE_CONFIG = {
   // 3. URL to the main script file in your GitHub repo
   //    Format: https://raw.githubusercontent.com/USERNAME/REPO/BRANCH/xero-integration.js
   //    Example: https://raw.githubusercontent.com/john/xero-sync/main/xero-integration.js
-  GITHUB_SCRIPT_URL: 'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/xero-integration.js'
+  GITHUB_SCRIPT_URL: 'https://raw.githubusercontent.com/wildlifeai/open_accounting/refs/heads/main/funding_reports/xero-integration.js'
 };
 
 // ==========================================
@@ -51,6 +51,18 @@ function loadXeroScript() {
     SpreadsheetApp.getUi().alert('Error loading Xero script: ' + error.toString());
     return false;
   }
+}
+
+/**
+ * Initializes the script on first run to request permissions
+ */
+function initialize() {
+  // This function requests all necessary permissions when run manually
+  SpreadsheetApp.getActiveSpreadsheet();
+  UrlFetchApp.fetch('https://www.google.com');
+  PropertiesService.getUserProperties();
+  
+  SpreadsheetApp.getUi().alert('Initialization complete! Now you can use the Xero Sync menu.');
 }
 
 /**
