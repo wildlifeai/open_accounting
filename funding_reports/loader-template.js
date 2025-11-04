@@ -1,5 +1,5 @@
 // ==========================================
-// XERO INTEGRATION LOADER SCRIPT - TEMPLATE
+// XERO INTEGRATION LOADER SCRIPT - WORKING VERSION
 // ==========================================
 // Copy this file to your Google Apps Script project
 // Rename it to something like "Config" or "MyPrivateScript"
@@ -18,95 +18,116 @@ const PRIVATE_CONFIG = {
   REDIRECT_URI: 'https://script.google.com/macros/d/YOUR_SCRIPT_ID_HERE/usercallback',
   
   // 3. URL to the main script file in your GitHub repo
-  //    Format: https://raw.githubusercontent.com/USERNAME/REPO/BRANCH/xero-integration.js
-  //    Example: https://raw.githubusercontent.com/john/xero-sync/main/xero-integration.js
   GITHUB_SCRIPT_URL: 'https://raw.githubusercontent.com/wildlifeai/open_accounting/refs/heads/main/funding_reports/xero-integration.js'
 };
 
 // ==========================================
-// DO NOT EDIT BELOW THIS LINE
+// SIMPLE APPROACH: FETCH ON DEMAND
 // ==========================================
 
 /**
- * Loads and evaluates the main script from GitHub
+ * Fetches the script from GitHub and returns it as text
  */
-function loadXeroScript() {
+function getScriptCode() {
   try {
-    const response = UrlFetchApp.fetch(PRIVATE_CONFIG.GITHUB_SCRIPT_URL);
-    const scriptCode = response.getContentText();
+    // Try cache first
+    let scriptCode = PropertiesService.getUserProperties().getProperty('CACHED_XERO_SCRIPT');
     
-    // Evaluate the script to load all functions into this context
-    eval(scriptCode);
+    if (!scriptCode) {
+      // Fetch from GitHub
+      const response = UrlFetchApp.fetch(PRIVATE_CONFIG.GITHUB_SCRIPT_URL);
+      scriptCode = response.getContentText();
+      
+      // Cache it
+      PropertiesService.getUserProperties().setProperty('CACHED_XERO_SCRIPT', scriptCode);
+    }
     
-    // Set the configuration with private credentials
-    setConfig(
-      PRIVATE_CONFIG.CLIENT_ID,
-      PRIVATE_CONFIG.CLIENT_SECRET,
-      PRIVATE_CONFIG.REDIRECT_URI
-    );
-    
-    return true;
+    return scriptCode;
   } catch (error) {
-    Logger.log('Error loading script from GitHub: ' + error.toString());
-    SpreadsheetApp.getUi().alert('Error loading Xero script: ' + error.toString());
-    return false;
+    throw new Error('Cannot load script: ' + error.toString());
   }
 }
 
 /**
- * Initializes the script on first run to request permissions
+ * Updates the cached script from GitHub
+ */
+function updateScriptFromGitHub() {
+  try {
+    const response = UrlFetchApp.fetch(PRIVATE_CONFIG.GITHUB_SCRIPT_URL);
+    const scriptCode = response.getContentText();
+    PropertiesService.getUserProperties().setProperty('CACHED_XERO_SCRIPT', scriptCode);
+    SpreadsheetApp.getUi().alert('Script updated successfully from GitHub!');
+  } catch (error) {
+    SpreadsheetApp.getUi().alert('Error updating script: ' + error.toString());
+  }
+}
+
+/**
+ * Initializes on first run
  */
 function initialize() {
-  // This function requests all necessary permissions when run manually
   SpreadsheetApp.getActiveSpreadsheet();
   UrlFetchApp.fetch('https://www.google.com');
   PropertiesService.getUserProperties();
   
-  SpreadsheetApp.getUi().alert('Initialization complete! Now you can use the Xero Sync menu.');
+  updateScriptFromGitHub();
+  
+  SpreadsheetApp.getUi().alert(
+    'Initialization complete!\n\n' +
+    'Reload your spreadsheet to see the "Xero Sync" menu.'
+  );
 }
 
 /**
- * Creates custom menu - automatically runs when spreadsheet opens
+ * Creates menu when spreadsheet opens
  */
 function onOpen() {
-  if (loadXeroScript()) {
-    // Call the onOpen from the loaded script
-    const ui = SpreadsheetApp.getUi();
+  const ui = SpreadsheetApp.getUi();
+  const hasCachedScript = PropertiesService.getUserProperties().getProperty('CACHED_XERO_SCRIPT') !== null;
+  
+  if (hasCachedScript) {
     ui.createMenu('Xero Sync')
-      .addItem('1. Authorize Xero', 'showAuthorizationUrlWrapper')
-      .addItem('2. Update Transactions', 'updateXeroTransactionsWrapper')
-      .addItem('Clear Authorization', 'clearAuthorizationWrapper')
+      .addItem('1. Authorize Xero', 'showAuthorizationUrl')
+      .addItem('2. Update Transactions', 'updateXeroTransactions')
+      .addSeparator()
+      .addItem('Update Script from GitHub', 'updateScriptFromGitHub')
+      .addItem('Clear Authorization', 'clearAuthorization')
+      .addToUi();
+  } else {
+    ui.createMenu('Xero Sync')
+      .addItem('⚠️ Setup Required - Run Initialize', 'initialize')
       .addToUi();
   }
 }
 
-/**
- * Wrapper functions that load the script before calling main functions
- */
-function showAuthorizationUrlWrapper() {
-  if (loadXeroScript()) {
-    showAuthorizationUrl();
-  }
+// ==========================================
+// XERO FUNCTIONS - These execute the loaded script
+// ==========================================
+
+function showAuthorizationUrl() {
+  const code = getScriptCode();
+  eval(code);
+  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
+  eval('showAuthorizationUrl()');
 }
 
-function updateXeroTransactionsWrapper() {
-  if (loadXeroScript()) {
-    updateXeroTransactions();
-  }
+function updateXeroTransactions() {
+  const code = getScriptCode();
+  eval(code);
+  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
+  eval('updateXeroTransactions()');
 }
 
-function clearAuthorizationWrapper() {
-  if (loadXeroScript()) {
-    clearAuthorization();
-  }
+function clearAuthorization() {
+  const code = getScriptCode();
+  eval(code);
+  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
+  eval('clearAuthorization()');
 }
 
-/**
- * OAuth callback handler - loads script before handling callback
- */
 function authCallback(request) {
-  if (loadXeroScript()) {
-    return authCallback(request);
-  }
-  return HtmlService.createHtmlOutput('Error: Could not load Xero script.');
+  const code = getScriptCode();
+  eval(code);
+  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
+  return eval('authCallback(request)');
 }
