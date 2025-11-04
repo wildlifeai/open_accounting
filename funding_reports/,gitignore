@@ -1,0 +1,34 @@
+# Xero Integration - Git Ignore File
+
+# IMPORTANT: Never commit files with sensitive credentials!
+
+# Loader script with private credentials
+loader-script.js
+*-private.js
+*-secret.js
+config-private.js
+
+# Environment files
+.env
+.env.local
+
+# Backup files
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Any file containing "credentials" or "secrets"
+*credentials*
+*secrets*
