@@ -34,19 +34,12 @@ Get up and running in 10 minutes!
 ### 3️⃣ Apps Script Setup (5 minutes)
 
 1. In your sheet: **Extensions** > **Apps Script**
-2. Delete existing code
-3. Copy code from [`loader-script.js`](loader-script.js) in this repo
-4. Paste and save
-5. Click **"+"** next to **Libraries**
-6. Add library ID: `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF`
+2. Click **"+"** next to **Libraries**
+3. Add library ID: `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF`
+4. Enable the 'Show "appsscript.json" manifest file in editor appscript' option from the Settings
+5. Copy code from [`appsscript-manifest.json`](funding_reports\appsscript-manifest.json) in this repo into the appscript.json
+6. Copy code from [`loader-template.js`](funding_reports\loader-template.js) in this repo into the code.gs file
 
-### 4️⃣ Deploy (2 minutes)
-
-1. Click **"Deploy"** > **"New deployment"**
-2. Type: **"Web app"**
-3. Execute as: **"Me"**
-4. Access: **"Anyone"**
-5. Click **"Deploy"** and authorize
 
 ### 5️⃣ Configure Credentials (3 minutes)
 
@@ -93,7 +86,10 @@ After syncing, you'll have a new sheet called **"Xero Transactions"** with colum
 ## 🚨 Common Issues
 
 ### "Menu doesn't appear"
-→ Run `onOpen` function manually in Apps Script, then reload sheet
+→ Run `initialize` function manually in Apps Script, then reload sheet
+
+### "Initialize doesn't finish running"
+→ Check your Gsheet for any messages
 
 ### "Authorization failed"
 → Check Client ID, Secret, and Redirect URI match exactly
