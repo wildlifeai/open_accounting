@@ -11,7 +11,7 @@ let CONFIG = {
   TRACKING_CATEGORY_NAME: 'Funding source',
   DATE_SHEET_NAME: 'Budget, Actual, Forecast Tracking',
   DATE_CELL: 'B3',
-  EXCLUDED_ACCOUNT_CODES: ['835', '600', '800', '820', '877']
+  EXCLUDED_ACCOUNT_CODES: ['835', '600', '610', '800', '820', '877']
 };
 
 /**
