@@ -44,9 +44,12 @@ function aggregateFundingData() {
     allData.push(...proposedData);
   }
   
+  // Group and aggregate the data
+  const aggregatedData = aggregateByFundingSourceAndMilestone(allData);
+  
   // Write all data to sheet
-  if (allData.length > 0) {
-    overviewSheet.getRange(2, 1, allData.length, headers.length).setValues(allData);
+  if (aggregatedData.length > 0) {
+    overviewSheet.getRange(2, 1, aggregatedData.length, headers.length).setValues(aggregatedData);
   }
   
   // Auto-resize columns
@@ -54,7 +57,58 @@ function aggregateFundingData() {
     overviewSheet.autoResizeColumn(i);
   }
   
-  Logger.log(`Successfully processed ${allData.length} funding entries`);
+  Logger.log(`Successfully processed ${aggregatedData.length} aggregated funding entries`);
+}
+
+/**
+ * Aggregate data by funding source and milestone
+ */
+function aggregateByFundingSourceAndMilestone(data) {
+  // Create a map with composite key: "fundingSource|secured|milestone"
+  const aggregationMap = {};
+  
+  for (const row of data) {
+    const [fundingSource, secured, milestone, cost, income, actualToDate] = row;
+    const key = `${fundingSource}|${secured}|${milestone}`;
+    
+    if (!aggregationMap[key]) {
+      aggregationMap[key] = {
+        fundingSource: fundingSource,
+        secured: secured,
+        milestone: milestone,
+        cost: 0,
+        income: 0,
+        actualToDate: 0
+      };
+    }
+    
+    // Sum the values
+    aggregationMap[key].cost += Number(cost) || 0;
+    aggregationMap[key].income += Number(income) || 0;
+    aggregationMap[key].actualToDate += Number(actualToDate) || 0;
+  }
+  
+  // Convert map back to array format
+  const aggregatedData = [];
+  for (const key in aggregationMap) {
+    const item = aggregationMap[key];
+    aggregatedData.push([
+      item.fundingSource,
+      item.secured,
+      item.milestone,
+      item.cost,
+      item.income,
+      item.actualToDate
+    ]);
+  }
+  
+  // Sort by funding source, then by milestone
+  aggregatedData.sort((a, b) => {
+    if (a[0] !== b[0]) return a[0].localeCompare(b[0]); // Sort by funding source
+    return a[2].localeCompare(b[2]); // Then by milestone
+  });
+  
+  return aggregatedData;
 }
 
 /**
