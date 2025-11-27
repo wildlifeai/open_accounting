@@ -321,8 +321,8 @@ function filterTransactionsByTracking(journals, trackingCategoryName, trackingCa
         );
       }
       
-      // Only include lines with matching tracking category
-      if (hasMatchingTracking) {
+      // Only include lines with matching tracking category and description starting with the funding code + "_"
+      if (hasMatchingTracking && (line.Description || '').startsWith(trackingCategoryValue + '_')) {
         transactions.push({
           date: parseXeroDate(journal.JournalDate),
           journalNumber: journal.JournalNumber,
