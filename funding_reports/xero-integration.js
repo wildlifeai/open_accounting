@@ -295,33 +295,28 @@ function parseXeroDate(xeroDateString) {
 }
 
 /**
- * Filters journal entries for specific tracking category and value
+ * Filters journal entries and removes VOIDED/REVERSED transaction noise
  */
 function filterTransactionsByTracking(journals, trackingCategoryName, trackingCategoryValue) {
   const transactions = [];
   
-  Logger.log('Filtering for tracking category: ' + trackingCategoryName + ' = ' + trackingCategoryValue);
-  Logger.log('Excluding account codes: ' + CONFIG.EXCLUDED_ACCOUNT_CODES.join(', '));
-  
+  Logger.log('Filtering and deduplicating transactions...');
+
   journals.forEach(journal => {
     if (!journal.JournalLines) return;
     
     journal.JournalLines.forEach(line => {
-      // Skip excluded account codes
-      if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(line.AccountCode)) {
-        return;
-      }
+      // 1. Basic Filters (Account Codes & Tracking)
+      if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(line.AccountCode)) return;
       
-      // Check if this line has the required tracking category
       let hasMatchingTracking = false;
-      
       if (line.TrackingCategories && line.TrackingCategories.length > 0) {
         hasMatchingTracking = line.TrackingCategories.some(tracking => 
           tracking.Name === trackingCategoryName && tracking.Option === trackingCategoryValue
         );
       }
       
-      // Only include lines with matching tracking category and description starting with the funding code + "_"
+      // Only proceed if tracking matches and description starts with code
       if (hasMatchingTracking && (line.Description || '').startsWith(trackingCategoryValue + '_')) {
         transactions.push({
           date: parseXeroDate(journal.JournalDate),
@@ -345,13 +340,38 @@ function filterTransactionsByTracking(journals, trackingCategoryName, trackingCa
       }
     });
   });
-  
+
+  // 2. Deduplication Logic: Remove Reversals
+  // We group by SourceID and AccountCode, then sum the NetAmounts.
+  // If the sum is zero, the transaction was fully reversed/voided.
+  const cleanedMap = new Map();
+
+  transactions.forEach(t => {
+    // Create a unique key for the specific transaction "event"
+    const key = `${t.sourceID}_${t.accountCode}`;
+    
+    if (!cleanedMap.has(key)) {
+      cleanedMap.set(key, t);
+    } else {
+      const existing = cleanedMap.get(key);
+      // Update the amount. If it was $246 (original) and we add -$246 (reversal), it becomes $0.
+      // If we then add $246 (new correction), it becomes $246 again.
+      existing.netAmount += t.netAmount;
+      // Update journal number and description to the latest version
+      existing.journalNumber = Math.max(existing.journalNumber, t.journalNumber);
+      existing.description = t.description; 
+    }
+  });
+
+  // Convert back to array and filter out any entries that ended up at $0 net
+  const finalTransactions = Array.from(cleanedMap.values())
+    .filter(t => Math.abs(t.netAmount) > 0.001); // Avoid floating point math errors
+
   // Sort by date (newest first)
-  transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+  finalTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
   
-  Logger.log('Filtered to ' + transactions.length + ' transactions');
-  
-  return transactions;
+  Logger.log('Filtered ' + transactions.length + ' down to ' + finalTransactions.length + ' active transactions');
+  return finalTransactions;
 }
 
 /**
