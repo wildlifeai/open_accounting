@@ -326,7 +326,7 @@ function filterTransactionsByTracking(journals, trackingCategoryName, trackingCa
           sourceID: journal.SourceID || '',
           accountCode: line.AccountCode,
           accountName: line.AccountName || '',
-          description: line.Description || '',
+          description: (line.Description || '').trim(),
           debit: line.NetAmount > 0 ? line.NetAmount : 0,
           credit: line.NetAmount < 0 ? Math.abs(line.NetAmount) : 0,
           netAmount: line.NetAmount,
