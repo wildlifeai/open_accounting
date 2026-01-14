@@ -316,8 +316,8 @@ function filterTransactionsByTracking(journals, trackingCategoryName, trackingCa
         );
       }
       
-      // Only proceed if tracking matches and description starts with code
-      if (hasMatchingTracking && (line.Description || '').startsWith(trackingCategoryValue + '_')) {
+      // Only proceed if tracking matches
+      if (hasMatchingTracking) {
         transactions.push({
           date: parseXeroDate(journal.JournalDate),
           journalNumber: journal.JournalNumber,
