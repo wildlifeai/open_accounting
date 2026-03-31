@@ -1,124 +1,126 @@
-# Quick Start Guide - Xero to Google Sheets
+# Xero to Google Sheets Integration
 
-Get up and running in 10 minutes!
+Automatically sync Xero transaction data into Google Sheets with a scalable, multi-sheet architecture.
 
-## ⚡ Quick Setup Checklist
-
-- [ ] Create Xero OAuth app
-- [ ] Set up Google Sheet with required sheet name and date cell
-- [ ] Copy loader script to Apps Script
-- [ ] Install OAuth2 library
-- [ ] Deploy as web app
-- [ ] Get Script ID and create redirect URI
-- [ ] Add redirect URI to Xero app
-- [ ] Update credentials in loader script
-- [ ] Authorize and sync!
-
-## 📋 Step-by-Step
-
-### 1️⃣ Xero Setup (2 minutes)
-
-1. Go to https://developer.xero.com/app/manage
-2. Click **"New app"**
-3. Fill in any name and URL
-4. Click **"Create app"**
-5. **Save your Client ID and Client Secret** ← Important!
-
-### 2️⃣ Google Sheet Setup (1 minute)
-
-1. Create or open a Google Sheet
-2. **Name the file** to match your Xero tracking category (e.g., "WW_25_TOI")
-3. Create a sheet called **"Budget, Actual, Forecast Tracking"**
-4. Put a start date in cell **B3** (e.g., `2024-01-01`)
-
-### 3️⃣ Apps Script Setup (5 minutes)
-
-1. In your sheet: **Extensions** > **Apps Script**
-2. Click **"+"** next to **Libraries**
-3. Add library ID: `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF`
-4. Enable the 'Show "appsscript.json" manifest file in editor appscript' option from the Settings
-5. Copy code from [`appsscript-manifest.json`](funding_reports\appsscript-manifest.json) in this repo into the appscript.json
-6. Copy code from [`loader-template.js`](funding_reports\loader-template.js) in this repo into the code.gs file
-
-
-### 5️⃣ Configure Credentials (3 minutes)
-
-1. In Apps Script: Click **gear icon** > Get your **Script ID**
-2. Create redirect URI: `https://script.google.com/macros/d/YOUR_SCRIPT_ID/usercallback`
-3. Add this URI to your Xero app settings
-4. In the loader script, update:
-   ```javascript
-   CLIENT_ID: 'paste_your_client_id_here',
-   CLIENT_SECRET: 'paste_your_client_secret_here',
-   REDIRECT_URI: 'paste_your_redirect_uri_here',
-   GITHUB_SCRIPT_URL: 'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/xero-integration.js'
-   ```
-5. Save
-
-### 6️⃣ Run It! (1 minute)
-
-1. Reload your Google Sheet
-2. Look for **"Xero Sync"** menu
-3. Click **"Xero Sync"** > **"1. Authorize Xero"**
-4. Authorize the connection
-5. Click **"Xero Sync"** > **"2. Update Transactions"**
-6. Done! ✅
-
-## 🎯 Expected Results
-
-After syncing, you'll have a new sheet called **"Xero Transactions"** with columns:
-- Date
-- Journal #
-- Reference
-- Source Type
-- Source ID
-- Account Code
-- Account Name
-- Description
-- Debit
-- Credit
-- Net Amount
-- Tax Amount
-- Gross Amount
-- Tracking 1
-- Tracking 2
-
-## 🚨 Common Issues
-
-### "Menu doesn't appear"
-→ Run `initialize` function manually in Apps Script, then reload sheet
-
-### "Initialize doesn't finish running"
-→ Check your Gsheet for any messages
-
-### "Authorization failed"
-→ Check Client ID, Secret, and Redirect URI match exactly
-
-### "0 transactions found"
-→ Check your sheet filename matches the Xero tracking category value
-
-### "Can't read date from B3"
-→ Make sure "Budget, Actual, Forecast Tracking" sheet exists with a date in B3
-
-## 🔧 Customization
-
-Want to change settings? Edit the `CONFIG` in `xero-integration.js`:
-
-```javascript
-SHEET_NAME: 'Xero Transactions',              // Output sheet name
-TRACKING_CATEGORY_NAME: 'Funding source',     // Your tracking category
-DATE_CELL: 'B3',                              // Start date cell
-EXCLUDED_ACCOUNT_CODES: ['835', '600', '800', '820'] // Accounts to skip
-```
-
-## 📚 Need More Help?
-
-See the full [README.md](README.md) for detailed instructions and troubleshooting.
-
-## 🔐 Security Reminder
-
-⚠️ **Never share or commit your loader script** - it contains your credentials!
+## ✨ Features
+* 🔐 OAuth 2.0 authentication with Xero
+* 📊 Fetches journal data from Xero API
+* 🎯 Filters by tracking category (based on Google Sheet name)
+* 🚫 Excludes configurable account codes
+* 📅 Incremental sync (only fetches new data)
+* 🔁 One-click or automated sync
+* 💾 Writes to "Xero Transactions" sheet
+* 🧪 Built-in System Check
+* 📜 Logging for debugging
+* 🔄 Retry logic for API failures
+* 🧩 Modular GitHub-based script loader
 
 ---
 
-Happy syncing! 🎉
+## 🧠 Architecture
+
+This system uses 2 files:
+
+1. **Loader Script (PRIVATE — in Apps Script):** Holds credentials, loads code from GitHub, and handles the menu and UI.
+2. **Xero Integration (PUBLIC — GitHub):** Contains all business logic and is safe to version and update centrally.
+
+---
+
+## ⚡ Quick Setup (10 mins)
+
+### ✅ Checklist
+* Create Xero OAuth app
+* Set up Google Sheet
+* Add Apps Script loader
+* Install OAuth2 library
+* Deploy as Web App
+* Configure credentials
+* Authorize + sync
+
+### 📋 Step-by-Step Setup
+
+#### 1️⃣ Xero Setup (2 min)
+Go to: https://developer.xero.com/app/manage. Click "New app", enter any name and URL, then click "Create app". Save your **Client ID** and **Client Secret**.
+
+#### 2️⃣ Google Sheet Setup (1 min)
+Create a Google Sheet. The name must be your tracking category value exactly (Example: `WW_25_TOI`). Create a secondary sheet named `Budget, Actual, Forecast Tracking`. Set cell `B3` to your start date (e.g., `2024-01-01`).
+
+#### 3️⃣ Apps Script Setup (5 min)
+Open **Extensions → Apps Script**. Paste your `loader-template.js`. Install the OAuth2 library using Script ID: `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF`. Save the project.
+
+#### 4️⃣ Deploy as Web App
+Click **Deploy → New Deployment → Web App**. Set "Execute as" to "Me" and "Access" to "Anyone". Deploy and authorize.
+
+#### 5️⃣ Configure Credentials
+Get your Script ID. Create your redirect URI (`https://script.google.com/macros/d/YOUR_SCRIPT_ID/usercallback`) and add it to your Xero app settings. Update the loader script with your details:
+
+```javascript
+const PRIVATE_CONFIG = {
+  CLIENT_ID: 'your_client_id',
+  CLIENT_SECRET: 'your_client_secret',
+  REDIRECT_URI: '[https://script.google.com/macros/d/YOUR_SCRIPT_ID/usercallback](https://script.google.com/macros/d/YOUR_SCRIPT_ID/usercallback)'
+};
+```
+
+
+#### ▶️ Usage
+##### First Time
+Reload your spreadsheet. Click Xero Sync → System Check. Then click Xero Sync → 1. Authorize Xero and approve access.
+
+##### Sync Data
+Click Xero Sync → 2. Update Transactions. You’ll see a success message with the total number of transactions synced.
+
+##### Optional: Auto Sync
+Run the setupAutoSync() function once directly inside the Apps Script Editor. This will trigger the sync every hour.
+
+#### 📊 Output
+The script creates a sheet named Xero Transactions with the following columns: Date, Source ID, Account Code, Net Amount.
+
+#### 🧪 System Check (NEW)
+Accessible via Xero Sync → System Check. This tool verifies that the script is loaded, the cache exists, and checks the last sync timestamp.
+
+#### 🔁 How Sync Works (IMPORTANT)
+Incremental Sync: Stores the last sync time and only fetches new or updated data from Xero.
+Safe Updates: Data is only saved to the sheet if the full sync succeeds, preventing partial data corruption.
+
+#### ⚙️ Configuration
+Edit these settings inside your main xero-integration.js file on GitHub:
+
+JavaScript
+const CONFIG = {
+  SHEET_NAME: 'Xero Transactions',
+  TRACKING_CATEGORY_NAME: 'Funding source',
+  DATE_SHEET_NAME: 'Budget, Actual, Forecast Tracking',
+  DATE_CELL: 'B3',
+  EXCLUDED_ACCOUNT_CODES: ['835', '600', '610', '800', '820', '877'],
+  TEST_MODE: false
+};
+
+#### 🧠 Multi-Sheet Design (KEY FEATURE)
+Each Google Sheet acts as its own completely isolated data pipeline. It uses the sheet name as the specific tracking filter and maintains its own authentication and sync state.
+
+✅ No cross-sheet interference
+
+✅ Safe scaling across many entities
+
+#### 📜 Logs (NEW)
+You can view detailed system operations by going to Apps Script → View → Logs. This includes sync start times, API fetches, transaction counts, and detailed error messages.
+
+#### 🚨 Troubleshooting
+##### "Please authorize first"
+Run: Xero Sync → 1. Authorize Xero
+
+##### "No transactions"
+Check that the sheet name is an EXACT match to the tracking value, B3 has a valid date, and the tracking category actually exists in Xero.
+
+##### "Script cache missing"
+Run: Xero Sync → Update Script from GitHub (or refresh script cache).
+
+##### "Unauthorized"
+Re-run the authorization steps from the menu.
+
+##### Data not updating
+Check the Apps Script execution logs for API failures or empty journal fetches.
+
+### 🔒 Security Notes
+CRITICAL: NEVER commit the loader script to a public repository. Keep your Client ID and Client Secret entirely private. Only the xero-integration.js code should be hosted publicly on GitHub.
