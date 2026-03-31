@@ -1,133 +1,139 @@
 // ==========================================
-// XERO INTEGRATION LOADER SCRIPT - WORKING VERSION
+// XERO INTEGRATION LOADER SCRIPT
 // ==========================================
 // Copy this file to your Google Apps Script project
 // Rename it to something like "Config" or "MyPrivateScript"
 // DO NOT commit this file to GitHub after adding your credentials!
 
-// ==========================================
-// CONFIGURATION - ADD YOUR CREDENTIALS HERE
-// ==========================================
 const PRIVATE_CONFIG = {
-  // 1. Get these from your Xero app: https://developer.xero.com/app/manage
-  CLIENT_ID: 'YOUR_CLIENT_ID_HERE',
-  CLIENT_SECRET: 'YOUR_CLIENT_SECRET_HERE',
-  
-  // 2. Format: https://script.google.com/macros/d/{YOUR_SCRIPT_ID}/usercallback
-  //    Get Script ID from: Apps Script > Project Settings (gear icon)
-  REDIRECT_URI: 'https://script.google.com/macros/d/YOUR_SCRIPT_ID_HERE/usercallback',
-  
-  // 3. URL to the main script file in your GitHub repo
+  CLIENT_ID: 'YOUR_CLIENT_ID',
+  CLIENT_SECRET: 'YOUR_CLIENT_SECRET',
+  REDIRECT_URI: 'https://script.google.com/macros/d/YOUR_SCRIPT_ID/usercallback',
+
   GITHUB_SCRIPT_URL: 'https://raw.githubusercontent.com/wildlifeai/open_accounting/refs/heads/main/funding_reports/xero-integration.js'
 };
 
-// ==========================================
-// SIMPLE APPROACH: FETCH ON DEMAND
-// ==========================================
+// ✅ Per-sheet storage (NOT shared globally)
+const CACHE_KEY = 'XERO_SCRIPT_CACHE';
 
-/**
- * Fetches the script from GitHub and returns it as text
- */
-function getScriptCode() {
-  try {
-    // Try cache first
-    let scriptCode = PropertiesService.getUserProperties().getProperty('CACHED_XERO_SCRIPT');
-    
-    if (!scriptCode) {
-      // Fetch from GitHub
-      const response = UrlFetchApp.fetch(PRIVATE_CONFIG.GITHUB_SCRIPT_URL);
-      scriptCode = response.getContentText();
-      
-      // Cache it
-      PropertiesService.getUserProperties().setProperty('CACHED_XERO_SCRIPT', scriptCode);
-    }
-    
-    return scriptCode;
-  } catch (error) {
-    throw new Error('Cannot load script: ' + error.toString());
+// ================= LOAD SCRIPT =================
+function loadXeroModule() {
+  const props = PropertiesService.getDocumentProperties();
+
+  let code = props.getProperty(CACHE_KEY);
+
+  if (!code) {
+    const res = UrlFetchApp.fetch(PRIVATE_CONFIG.GITHUB_SCRIPT_URL);
+    code = res.getContentText();
+
+    props.setProperty(CACHE_KEY, code);
   }
+
+  const moduleFactory = new Function(`
+    ${code}
+    return XeroIntegration;
+  `);
+
+  const XeroIntegration = moduleFactory();
+
+  return XeroIntegration(PRIVATE_CONFIG);
 }
 
-/**
- * Updates the cached script from GitHub
- */
-function updateScriptFromGitHub() {
-  try {
-    const response = UrlFetchApp.fetch(PRIVATE_CONFIG.GITHUB_SCRIPT_URL);
-    const scriptCode = response.getContentText();
-    PropertiesService.getUserProperties().setProperty('CACHED_XERO_SCRIPT', scriptCode);
-    SpreadsheetApp.getUi().alert('Script updated successfully from GitHub!');
-  } catch (error) {
-    SpreadsheetApp.getUi().alert('Error updating script: ' + error.toString());
-  }
+// ================= MENU =================
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Xero Sync')
+    .addItem('1. Authorize Xero', 'authorize')
+    .addItem('2. Update Transactions', 'runUpdate')
+    .addItem('System Check', 'systemCheck')
+    .addItem('Refresh Script Cache', 'refreshScript')
+    .addItem('Clear Auth', 'clearAuth')
+    .addToUi();
 }
 
-/**
- * Initializes on first run
- */
-function initialize() {
-  SpreadsheetApp.getActiveSpreadsheet();
-  UrlFetchApp.fetch('https://www.google.com');
-  PropertiesService.getUserProperties();
-  
-  updateScriptFromGitHub();
-  
-  SpreadsheetApp.getUi().alert(
-    'Initialization complete!\n\n' +
-    'Reload your spreadsheet to see the "Xero Sync" menu.'
+// ================= ACTIONS =================
+function authorize() {
+  const xero = loadXeroModule();
+  const url = xero.showAuthorizationUrl();
+
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(`<a href="${url}" target="_blank">Authorize Xero</a>`),
+    'Authorize Xero'
   );
 }
 
-/**
- * Creates menu when spreadsheet opens
- */
-function onOpen() {
+function runUpdate() {
   const ui = SpreadsheetApp.getUi();
-  const hasCachedScript = PropertiesService.getUserProperties().getProperty('CACHED_XERO_SCRIPT') !== null;
-  
-  if (hasCachedScript) {
-    ui.createMenu('Xero Sync')
-      .addItem('1. Authorize Xero', 'showAuthorizationUrl')
-      .addItem('2. Update Transactions', 'updateXeroTransactions')
-      .addSeparator()
-      .addItem('Update Script from GitHub', 'updateScriptFromGitHub')
-      .addItem('Clear Authorization', 'clearAuthorization')
-      .addToUi();
-  } else {
-    ui.createMenu('Xero Sync')
-      .addItem('⚠️ Setup Required - Run Initialize', 'initialize')
-      .addToUi();
+
+  try {
+    const xero = loadXeroModule();
+    const result = xero.updateXeroTransactions();
+
+    ui.alert('✅ ' + result);
+
+  } catch (e) {
+    if (e.message === 'NOT_AUTHORIZED') {
+      ui.alert('Please authorize first.');
+    } else {
+      ui.alert('❌ Error: ' + e.message);
+    }
   }
 }
 
-// ==========================================
-// XERO FUNCTIONS - These execute the loaded script
-// ==========================================
-
-function showAuthorizationUrl() {
-  const code = getScriptCode();
-  eval(code);
-  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
-  eval('showAuthorizationUrl()');
+function clearAuth() {
+  loadXeroModule().clearAuthorization();
+  SpreadsheetApp.getUi().alert('Auth cleared');
 }
 
-function updateXeroTransactions() {
-  const code = getScriptCode();
-  eval(code);
-  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
-  eval('updateXeroTransactions()');
+// ================= SYSTEM CHECK =================
+function systemCheck() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getDocumentProperties();
+
+  try {
+    const xero = loadXeroModule();
+
+    const cache = props.getProperty(CACHE_KEY);
+    if (!cache) throw new Error('Script cache missing');
+
+    const lastSync = props.getProperty('XERO_LAST_SYNC');
+
+    ui.alert(
+      '✅ System OK\n' +
+      'Cache: OK\n' +
+      'Last Sync: ' + (lastSync || 'Never')
+    );
+
+  } catch (e) {
+    ui.alert('❌ System Error: ' + e.message);
+  }
 }
 
-function clearAuthorization() {
-  const code = getScriptCode();
-  eval(code);
-  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
-  eval('clearAuthorization()');
-}
-
+// ================= CALLBACK =================
 function authCallback(request) {
-  const code = getScriptCode();
-  eval(code);
-  eval(`setConfig('${PRIVATE_CONFIG.CLIENT_ID}', '${PRIVATE_CONFIG.CLIENT_SECRET}', '${PRIVATE_CONFIG.REDIRECT_URI}')`);
-  return eval('authCallback(request)');
+  const success = loadXeroModule().handleCallback(request);
+
+  return HtmlService.createHtmlOutput(
+    success ? 'Success! You can close this tab.' : 'Auth failed'
+  );
+}
+
+// ================= CACHE CONTROL =================
+function refreshScript() {
+  const res = UrlFetchApp.fetch(PRIVATE_CONFIG.GITHUB_SCRIPT_URL);
+
+  PropertiesService.getDocumentProperties().setProperty(
+    CACHE_KEY,
+    res.getContentText()
+  );
+
+  SpreadsheetApp.getUi().alert('Script updated');
+}
+
+// ================= AUTO SYNC =================
+function setupAutoSync() {
+  ScriptApp.newTrigger('runUpdate')
+    .timeBased()
+    .everyHours(1)
+    .create();
 }

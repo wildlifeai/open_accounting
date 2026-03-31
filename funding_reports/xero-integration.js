@@ -1,481 +1,266 @@
-// Xero API Integration for Google Sheets
+// Xero API Integration module for Google Sheets
 // This script fetches journal/transaction data from Xero and updates the "Xero Transactions" sheet
-// GitHub: [Your Repository URL Here]
 
-// CONFIGURATION - These are set via setConfig() function in your private script
-let CONFIG = {
-  CLIENT_ID: '',
-  CLIENT_SECRET: '',
-  REDIRECT_URI: '',
-  SHEET_NAME: 'Xero Transactions',
-  TRACKING_CATEGORY_NAME: 'Funding source',
-  DATE_SHEET_NAME: 'Budget, Actual, Forecast Tracking',
-  DATE_CELL: 'B3',
-  EXCLUDED_ACCOUNT_CODES: ['835', '600', '610', '800', '820', '877']
-};
+function XeroIntegration(config) {
 
-/**
- * Sets the configuration with sensitive credentials
- * This should be called from your private config script
- */
-function setConfig(clientId, clientSecret, redirectUri) {
-  CONFIG.CLIENT_ID = clientId;
-  CONFIG.CLIENT_SECRET = clientSecret;
-  CONFIG.REDIRECT_URI = redirectUri;
-}
+  const CONFIG = {
+    SHEET_NAME: 'Xero Transactions',
+    TRACKING_CATEGORY_NAME: 'Funding source',
 
-/**
- * Gets the current configuration
- */
-function getConfig() {
-  return CONFIG;
-}
+    DATE_SHEET_NAME: 'Budget, Actual, Forecast Tracking',
+    DATE_CELL: 'B3',
 
-// OAuth 2.0 endpoints
-const XERO_AUTH_URL = 'https://login.xero.com/identity/connect/authorize';
-const XERO_TOKEN_URL = 'https://identity.xero.com/connect/token';
-const XERO_API_BASE = 'https://api.xero.com/api.xro/2.0';
-const XERO_IDENTITY_URL = 'https://api.xero.com/connections';
+    EXCLUDED_ACCOUNT_CODES: ['835', '600', '610', '800', '820', '877'],
 
-/**
- * Creates a custom menu in Google Sheets when the document opens
- */
-function onOpen() {
-  const ui = SpreadsheetApp.getUi();
-  ui.createMenu('Xero Sync')
-    .addItem('1. Authorize Xero', 'showAuthorizationUrl')
-    .addItem('2. Update Transactions', 'updateXeroTransactions')
-    .addItem('Clear Authorization', 'clearAuthorization')
-    .addToUi();
-}
+    SYNC_PROPERTY_KEY: 'XERO_LAST_SYNC',
 
-/**
- * Step 1: Display authorization URL for user to connect to Xero
- */
-function showAuthorizationUrl() {
-  const service = getXeroService();
-  
-  if (service.hasAccess()) {
-    SpreadsheetApp.getUi().alert('Already authorized! You can now update transactions.');
-    return;
+    TEST_MODE: false
+  };
+
+  const XERO_API_BASE = 'https://api.xero.com/api.xro/2.0';
+  const XERO_IDENTITY_URL = 'https://api.xero.com/connections';
+
+  // ================= LOGGER =================
+  function log(message, data = null) {
+    Logger.log(JSON.stringify({
+      time: new Date().toISOString(),
+      message,
+      data
+    }));
   }
-  
-  const authorizationUrl = service.getAuthorizationUrl();
-  const template = HtmlService.createHtmlOutput(
-    '<p>Click the link below to authorize access to Xero:</p>' +
-    '<p><a href="' + authorizationUrl + '" target="_blank">Authorize Xero Access</a></p>' +
-    '<p>After authorizing, close this window and run "Update Transactions".</p>'
-  );
-  
-  SpreadsheetApp.getUi().showModalDialog(template, 'Xero Authorization');
-}
 
-/**
- * OAuth2 callback handler
- */
-function authCallback(request) {
-  const service = getXeroService();
-  const isAuthorized = service.handleCallback(request);
-  
-  if (isAuthorized) {
-    return HtmlService.createHtmlOutput('Success! You can close this tab and return to your spreadsheet.');
-  } else {
-    return HtmlService.createHtmlOutput('Authorization failed. Please try again.');
-  }
-}
+  // ================= RETRY =================
+  function fetchWithRetry(url, options, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = UrlFetchApp.fetch(url, options);
 
-/**
- * Clears stored authorization
- */
-function clearAuthorization() {
-  const service = getXeroService();
-  service.reset();
-  SpreadsheetApp.getUi().alert('Authorization cleared. Run "Authorize Xero" to reconnect.');
-}
+        if (res.getResponseCode() < 300) return res;
 
-/**
- * Creates and configures the OAuth2 service for Xero
- */
-function getXeroService() {
-  return OAuth2.createService('xero')
-    .setAuthorizationBaseUrl(XERO_AUTH_URL)
-    .setTokenUrl(XERO_TOKEN_URL)
-    .setClientId(CONFIG.CLIENT_ID)
-    .setClientSecret(CONFIG.CLIENT_SECRET)
-    .setCallbackFunction('authCallback')
-    .setPropertyStore(PropertiesService.getUserProperties())
-    .setScope('offline_access accounting.transactions.read accounting.reports.read accounting.journals.read')
-    .setParam('response_type', 'code')
-    .setTokenHeaders({
-      'Authorization': 'Basic ' + Utilities.base64Encode(CONFIG.CLIENT_ID + ':' + CONFIG.CLIENT_SECRET)
-    });
-}
-
-/**
- * Main function: Fetches journal data from Xero and updates the sheet
- */
-function updateXeroTransactions() {
-  const ui = SpreadsheetApp.getUi();
-  const service = getXeroService();
-  
-  // Check authorization
-  if (!service.hasAccess()) {
-    ui.alert('Not authorized. Please run "Authorize Xero" first.');
-    return;
-  }
-  
-  try {
-    ui.alert('Fetching data from Xero... This may take a moment.');
-    
-    // Get the spreadsheet filename to use as tracking category value
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const trackingCategoryValue = ss.getName();
-    
-    // Get start date from the specified sheet and cell
-    const startDate = getStartDateFromSheet();
-    
-    if (!startDate) {
-      ui.alert('Error: Could not read start date from cell ' + CONFIG.DATE_CELL + 
-               ' in sheet "' + CONFIG.DATE_SHEET_NAME + '". Please ensure the cell contains a valid date.');
-      return;
-    }
-    
-    // Get tenant ID
-    const tenantId = getXeroTenantId(service);
-    
-    if (!tenantId) {
-      ui.alert('Error: Could not retrieve Xero organization. Please re-authorize.');
-      return;
-    }
-    
-    // Fetch journals (account transactions)
-    const journals = fetchXeroJournals(service, tenantId, startDate);
-    
-    // Filter for specific tracking category
-    const filteredTransactions = filterTransactionsByTracking(journals, 
-      CONFIG.TRACKING_CATEGORY_NAME, 
-      trackingCategoryValue);
-    
-    // Update the sheet
-    updateSheet(filteredTransactions);
-    
-    ui.alert('Success! Updated ' + filteredTransactions.length + ' transactions.');
-    
-  } catch (error) {
-    Logger.log('Error: ' + error.toString());
-    ui.alert('Error: ' + error.toString());
-  }
-}
-
-/**
- * Retrieves the start date from the specified sheet and cell
- */
-function getStartDateFromSheet() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(CONFIG.DATE_SHEET_NAME);
-    
-    if (!sheet) {
-      Logger.log('Sheet "' + CONFIG.DATE_SHEET_NAME + '" not found.');
-      return null;
-    }
-    
-    const dateValue = sheet.getRange(CONFIG.DATE_CELL).getValue();
-    
-    if (!dateValue) {
-      Logger.log('Cell ' + CONFIG.DATE_CELL + ' is empty.');
-      return null;
-    }
-    
-    // Convert to date if it's not already
-    const date = new Date(dateValue);
-    
-    if (isNaN(date.getTime())) {
-      Logger.log('Invalid date in cell ' + CONFIG.DATE_CELL + ': ' + dateValue);
-      return null;
-    }
-    
-    return date;
-  } catch (error) {
-    Logger.log('Error reading start date: ' + error.toString());
-    return null;
-  }
-}
-
-/**
- * Retrieves the Xero tenant (organization) ID
- */
-function getXeroTenantId(service) {
-  const response = UrlFetchApp.fetch(XERO_IDENTITY_URL, {
-    headers: {
-      'Authorization': 'Bearer ' + service.getAccessToken(),
-      'Content-Type': 'application/json'
-    },
-    muteHttpExceptions: true
-  });
-  
-  if (response.getResponseCode() === 200) {
-    const connections = JSON.parse(response.getContentText());
-    if (connections && connections.length > 0) {
-      return connections[0].tenantId;
+      } catch (e) {
+        if (i === retries - 1) throw e;
+        Utilities.sleep(1000 * (i + 1));
+      }
     }
   }
-  
-  return null;
-}
 
-/**
- * Fetches journals from Xero API with pagination
- */
-function fetchXeroJournals(service, tenantId, startDate) {
-  const allJournals = [];
-  let offset = 0;
-  const pageSize = 100;
-  let hasMore = true;
-  
-  // Format start date for Xero API
-  const fromDateStr = Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  
-  Logger.log('Fetching journals from ' + fromDateStr + ' to today');
-  
-  while (hasMore) {
-    const url = `${XERO_API_BASE}/Journals?offset=${offset}&if-modified-since=${fromDateStr}`;
-    
-    const response = UrlFetchApp.fetch(url, {
+  // ================= AUTH =================
+  function getXeroService() {
+    return OAuth2.createService('xero')
+      .setAuthorizationBaseUrl('https://login.xero.com/identity/connect/authorize')
+      .setTokenUrl('https://identity.xero.com/connect/token')
+      .setClientId(config.CLIENT_ID)
+      .setClientSecret(config.CLIENT_SECRET)
+      .setCallbackFunction('authCallback')
+      .setPropertyStore(PropertiesService.getDocumentProperties())
+      .setScope('offline_access accounting.transactions.read accounting.journals.read')
+      .setParam('response_type', 'code')
+      .setTokenHeaders({
+        Authorization: 'Basic ' + Utilities.base64Encode(config.CLIENT_ID + ':' + config.CLIENT_SECRET)
+      });
+  }
+
+  // ================= MAIN =================
+  function updateXeroTransactions() {
+    const service = getXeroService();
+
+    if (!service.hasAccess()) {
+      throw new Error('NOT_AUTHORIZED');
+    }
+
+    log('Starting sync');
+
+    const props = PropertiesService.getDocumentProperties();
+
+    try {
+      const tenantId = getTenantId(service);
+      const startDate = getSyncStartDate();
+
+      log('Fetching from', startDate);
+
+      const journals = fetchJournals(service, tenantId, startDate);
+
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const trackingValue = ss.getName();
+
+      const filtered = filterTransactionsByTracking(
+        journals,
+        CONFIG.TRACKING_CATEGORY_NAME,
+        trackingValue
+      );
+
+      log('Filtered transactions', filtered.length);
+
+      if (CONFIG.TEST_MODE) {
+        log('TEST MODE - skipping write');
+        return 'TEST SUCCESS';
+      }
+
+      updateSheet(filtered);
+
+      // ✅ Only save sync if everything succeeded
+      props.setProperty(CONFIG.SYNC_PROPERTY_KEY, new Date().toISOString());
+
+      return `SUCCESS: ${filtered.length} transactions`;
+
+    } catch (e) {
+      log('Sync failed', e.message);
+      throw e;
+    }
+  }
+
+  // ================= TENANT =================
+  function getTenantId(service) {
+    const res = fetchWithRetry(XERO_IDENTITY_URL, {
       headers: {
-        'Authorization': 'Bearer ' + service.getAccessToken(),
-        'xero-tenant-id': tenantId,
-        'Accept': 'application/json'
-      },
-      muteHttpExceptions: true
+        Authorization: 'Bearer ' + service.getAccessToken()
+      }
     });
-    
-    if (response.getResponseCode() !== 200) {
-      throw new Error('Failed to fetch journals: ' + response.getContentText());
-    }
-    
-    const data = JSON.parse(response.getContentText());
-    
-    if (data.Journals && data.Journals.length > 0) {
-      allJournals.push(...data.Journals);
+
+    const data = JSON.parse(res.getContentText());
+
+    if (!data.length) throw new Error('No Xero tenant found');
+
+    return data[0].tenantId;
+  }
+
+  // ================= FETCH =================
+  function fetchJournals(service, tenantId, startDate) {
+    let all = [];
+    let offset = 0;
+    const pageSize = 100;
+
+    const fromDate = Utilities.formatDate(startDate, 'GMT', 'yyyy-MM-dd');
+
+    while (true) {
+      const url = `${XERO_API_BASE}/Journals?offset=${offset}&if-modified-since=${fromDate}`;
+
+      const res = fetchWithRetry(url, {
+        headers: {
+          Authorization: 'Bearer ' + service.getAccessToken(),
+          'xero-tenant-id': tenantId
+        }
+      });
+
+      const data = JSON.parse(res.getContentText());
+
+      if (!data.Journals || data.Journals.length === 0) break;
+
+      all.push(...data.Journals);
+
+      if (data.Journals.length < pageSize) break;
+
       offset += pageSize;
-      
-      // If we got fewer than pageSize results, we've reached the end
-      if (data.Journals.length < pageSize) {
-        hasMore = false;
-      }
-    } else {
-      hasMore = false;
+      Utilities.sleep(300);
     }
-    
-    // Avoid hitting rate limits
-    Utilities.sleep(300);
+
+    log('Fetched journals', all.length);
+    return all;
   }
-  
-  Logger.log('Fetched ' + allJournals.length + ' journals total');
-  
-  return allJournals;
-}
 
-/**
- * Parses Xero date format to JavaScript Date object
- * Xero dates come in format like "/Date(1609459200000+0000)/"
- */
-function parseXeroDate(xeroDateString) {
-  if (!xeroDateString) return new Date();
-  
-  // If it's already a proper date string
-  if (xeroDateString.indexOf('/Date(') === -1) {
-    return new Date(xeroDateString);
+  // ================= SYNC DATE =================
+  function getSyncStartDate() {
+    const props = PropertiesService.getDocumentProperties();
+    const lastSync = props.getProperty(CONFIG.SYNC_PROPERTY_KEY);
+
+    if (lastSync) return new Date(lastSync);
+
+    return getStartDateFromSheet();
   }
-  
-  // Extract timestamp from Xero's /Date(timestamp)/ format
-  const timestamp = parseInt(xeroDateString.match(/\d+/)[0]);
-  return new Date(timestamp);
-}
 
-/**
- * Filters journal entries and removes VOIDED/REVERSED transaction noise
- */
-function filterTransactionsByTracking(journals, trackingCategoryName, trackingCategoryValue) {
-  const transactions = [];
-  
-  Logger.log('Filtering and deduplicating transactions...');
+  function getStartDateFromSheet() {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet()
+      .getSheetByName(CONFIG.DATE_SHEET_NAME);
 
-  journals.forEach(journal => {
-    if (!journal.JournalLines) return;
-    
-    journal.JournalLines.forEach(line => {
-      // 1. Basic Filters (Account Codes & Tracking)
-      if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(line.AccountCode)) return;
-      
-      let hasMatchingTracking = false;
-      if (line.TrackingCategories && line.TrackingCategories.length > 0) {
-        hasMatchingTracking = line.TrackingCategories.some(tracking => 
-          tracking.Name === trackingCategoryName && tracking.Option === trackingCategoryValue
+    const val = sheet.getRange(CONFIG.DATE_CELL).getValue();
+    return new Date(val);
+  }
+
+  // ================= FILTER =================
+  function filterTransactionsByTracking(journals, name, value) {
+    const tx = [];
+
+    journals.forEach(j => {
+      (j.JournalLines || []).forEach(l => {
+        if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
+
+        const match = (l.TrackingCategories || []).some(
+          t => t.Name === name && t.Option === value
         );
-      }
-      
-      // Only proceed if tracking matches
-      if (hasMatchingTracking) {
-        transactions.push({
-          date: parseXeroDate(journal.JournalDate),
-          journalNumber: journal.JournalNumber,
-          reference: journal.Reference || '',
-          sourceType: journal.SourceType || '',
-          sourceID: journal.SourceID || '',
-          accountCode: line.AccountCode,
-          accountName: line.AccountName || '',
-          description: (line.Description || '').trim(),
-          debit: line.NetAmount > 0 ? line.NetAmount : 0,
-          credit: line.NetAmount < 0 ? Math.abs(line.NetAmount) : 0,
-          netAmount: line.NetAmount,
-          taxAmount: line.TaxAmount || 0,
-          grossAmount: line.GrossAmount || 0,
-          trackingCategory1: line.TrackingCategories && line.TrackingCategories[0] ? 
-            line.TrackingCategories[0].Name + ': ' + line.TrackingCategories[0].Option : '',
-          trackingCategory2: line.TrackingCategories && line.TrackingCategories[1] ? 
-            line.TrackingCategories[1].Name + ': ' + line.TrackingCategories[1].Option : ''
+
+        if (!match) return;
+
+        tx.push({
+          date: parseXeroDate(j.JournalDate),
+          sourceID: j.SourceID,
+          accountCode: l.AccountCode,
+          netAmount: l.NetAmount
         });
+      });
+    });
+
+    const map = new Map();
+
+    tx.forEach(t => {
+      const key = `${t.sourceID}_${t.accountCode}`;
+
+      if (!map.has(key)) {
+        map.set(key, t);
+      } else {
+        map.get(key).netAmount += t.netAmount;
       }
     });
-  });
 
-  // 2. Deduplication Logic: Remove Reversals
-  // We group by SourceID and AccountCode, then sum the NetAmounts.
-  // If the sum is zero, the transaction was fully reversed/voided.
-  const cleanedMap = new Map();
-
-  transactions.forEach(t => {
-    // Create a unique key for the specific transaction "event"
-    const key = `${t.sourceID}_${t.accountCode}`;
-    
-    if (!cleanedMap.has(key)) {
-      cleanedMap.set(key, t);
-    } else {
-      const existing = cleanedMap.get(key);
-      // Update the amount. If it was $246 (original) and we add -$246 (reversal), it becomes $0.
-      // If we then add $246 (new correction), it becomes $246 again.
-      existing.netAmount += t.netAmount;
-      // Update journal number and description to the latest version
-      existing.journalNumber = Math.max(existing.journalNumber, t.journalNumber);
-      existing.description = t.description; 
-    }
-  });
-
-  // Convert back to array and filter out any entries that ended up at $0 net
-  const finalTransactions = Array.from(cleanedMap.values())
-    .filter(t => Math.abs(t.netAmount) > 0.001); // Avoid floating point math errors
-
-  // Sort by date (newest first)
-  finalTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
-  
-  Logger.log('Filtered ' + transactions.length + ' down to ' + finalTransactions.length + ' active transactions');
-  return finalTransactions;
-}
-
-/**
- * Updates the Google Sheet with transaction data
- */
-function updateSheet(transactions) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
-  
-  // Create sheet if it doesn't exist
-  if (!sheet) {
-    sheet = ss.insertSheet(CONFIG.SHEET_NAME);
+    return Array.from(map.values()).filter(t => Math.abs(t.netAmount) > 0.001);
   }
-  
-  // Clear existing data
-  sheet.clear();
-  
-  // Set headers
-  const headers = [
-    'Date', 
-    'Journal #', 
-    'Reference', 
-    'Source Type',
-    'Source ID',
-    'Account Code', 
-    'Account Name', 
-    'Description', 
-    'Debit', 
-    'Credit', 
-    'Net Amount',
-    'Tax Amount',
-    'Gross Amount',
-    'Tracking 1',
-    'Tracking 2'
-  ];
-  
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-  sheet.setFrozenRows(1);
-  
-  // Add data
-  if (transactions.length > 0) {
-    const data = transactions.map(t => [
-      t.date, // Already a Date object now
-      t.journalNumber,
-      t.reference,
-      t.sourceType,
-      t.sourceID,
-      t.accountCode,
-      t.accountName,
-      t.description,
-      t.debit,
-      t.credit,
-      t.netAmount,
-      t.taxAmount,
-      t.grossAmount,
-      t.trackingCategory1,
-      t.trackingCategory2
+
+  // ================= DATE =================
+  function parseXeroDate(x) {
+    if (!x.includes('/Date(')) return new Date(x);
+    return new Date(parseInt(x.match(/\d+/)[0]));
+  }
+
+  // ================= SHEET =================
+  function updateSheet(data) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
+
+    if (!sheet) sheet = ss.insertSheet(CONFIG.SHEET_NAME);
+
+    if (sheet.getLastRow() > 10000) {
+      throw new Error('Sheet too large - possible issue');
+    }
+
+    sheet.clear();
+
+    sheet.getRange(1, 1, 1, 4).setValues([
+      ['Date', 'Source ID', 'Account', 'Net']
     ]);
-    
-    sheet.getRange(2, 1, data.length, headers.length).setValues(data);
-    
-    // Format date column
-    sheet.getRange(2, 1, data.length, 1).setNumberFormat('yyyy-mm-dd');
-    
-    // Format currency columns (Debit, Credit, Net Amount, Tax Amount, Gross Amount)
-    sheet.getRange(2, 9, data.length, 5).setNumberFormat('$#,##0.00');
-    
-    // Auto-resize columns
-    for (let i = 1; i <= headers.length; i++) {
-      sheet.autoResizeColumn(i);
+
+    const rows = data.map(d => [d.date, d.sourceID, d.accountCode, d.netAmount]);
+
+    if (rows.length) {
+      sheet.getRange(2, 1, rows.length, 4).setValues(rows);
     }
   }
-}
 
-/**
- * SETUP INSTRUCTIONS:
- * 
- * 1. Install OAuth2 Library:
- *    - In Apps Script editor, click "+" next to Libraries
- *    - Enter Script ID: 1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF
- *    - Select the latest version and click "Add"
- * 
- * 2. Create Xero OAuth App:
- *    - Go to https://developer.xero.com/app/manage
- *    - Create a new app
- *    - Set redirect URI to: https://script.google.com/macros/d/{YOUR_SCRIPT_ID}/usercallback
- *    - Copy Client ID and Client Secret to CONFIG above
- * 
- * 3. Deploy as Web App:
- *    - Click "Deploy" > "New deployment"
- *    - Select type "Web app"
- *    - Execute as: "Me"
- *    - Who has access: "Anyone"
- *    - Click "Deploy" and authorize
- * 
- * 4. Get Script ID:
- *    - In Apps Script, go to Project Settings
- *    - Copy the Script ID
- *    - Update REDIRECT_URI in CONFIG above
- * 
- * 5. Run the script:
- *    - Reload your spreadsheet
- *    - Use the "Xero Sync" menu
- *    - First run "Authorize Xero"
- *    - Then run "Update Transactions"
- */
+  // ================= AUTH HELPERS =================
+  function showAuthorizationUrl() {
+    return getXeroService().getAuthorizationUrl();
+  }
+
+  function handleCallback(request) {
+    return getXeroService().handleCallback(request);
+  }
+
+  function clearAuthorization() {
+    getXeroService().reset();
+  }
+
+  return {
+    updateXeroTransactions,
+    showAuthorizationUrl,
+    handleCallback,
+    clearAuthorization
+  };
+}
