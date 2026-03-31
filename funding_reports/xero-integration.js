@@ -178,41 +178,65 @@ function XeroIntegration(config) {
 
   // ================= FILTER =================
   function filterTransactionsByTracking(journals, name, value) {
-    const tx = [];
+  const rows = [];
 
-    journals.forEach(j => {
-      (j.JournalLines || []).forEach(l => {
-        if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
+  journals.forEach(j => {
+    const journalNumber = j.JournalNumber || '';
+    const sourceType = j.SourceType || '';
+    const reference = j.Reference || '';
+    const sourceID = j.SourceID || '';
+    const date = parseXeroDate(j.JournalDate);
 
-        const match = (l.TrackingCategories || []).some(
-          t => t.Name === name && t.Option === value
-        );
+    (j.JournalLines || []).forEach(l => {
+      if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
 
-        if (!match) return;
+      // ✅ tracking match
+      const tracking = l.TrackingCategories || [];
 
-        tx.push({
-          date: parseXeroDate(j.JournalDate),
-          sourceID: j.SourceID,
-          accountCode: l.AccountCode,
-          netAmount: l.NetAmount
-        });
-      });
+      const match = tracking.some(
+        t => t.Name === name && t.Option === value
+      );
+
+      if (!match) return;
+
+      const net = l.NetAmount || 0;
+      const tax = l.TaxAmount || 0;
+      const gross = net + tax;
+
+      const debit = net > 0 ? net : 0;
+      const credit = net < 0 ? Math.abs(net) : 0;
+
+      // Format tracking nicely
+      const tracking1 = tracking[0]
+        ? `${tracking[0].Name}: ${tracking[0].Option}`
+        : '';
+
+      const tracking2 = tracking[1]
+        ? `${tracking[1].Name}: ${tracking[1].Option}`
+        : '';
+
+      rows.push([
+        date,
+        journalNumber,
+        reference,
+        sourceType,
+        sourceID,
+        l.AccountCode,
+        l.AccountName || '',
+        l.Description || '',
+        debit,
+        credit,
+        net,
+        tax,
+        gross,
+        tracking1,
+        tracking2
+      ]);
     });
+  });
 
-    const map = new Map();
-
-    tx.forEach(t => {
-      const key = `${t.sourceID}_${t.accountCode}`;
-
-      if (!map.has(key)) {
-        map.set(key, t);
-      } else {
-        map.get(key).netAmount += t.netAmount;
-      }
-    });
-
-    return Array.from(map.values()).filter(t => Math.abs(t.netAmount) > 0.001);
-  }
+  return rows;
+}
 
   // ================= DATE =================
   function parseXeroDate(x) {
@@ -221,28 +245,39 @@ function XeroIntegration(config) {
   }
 
   // ================= SHEET =================
-  function updateSheet(data) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
+  function updateSheet(rows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
 
-    if (!sheet) sheet = ss.insertSheet(CONFIG.SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(CONFIG.SHEET_NAME);
 
-    if (sheet.getLastRow() > 10000) {
-      throw new Error('Sheet too large - possible issue');
-    }
+  sheet.clear();
 
-    sheet.clear();
+  const headers = [[
+    'Date',
+    'Journal #',
+    'Reference',
+    'Source Type',
+    'Source ID',
+    'Account Code',
+    'Account Name',
+    'Description',
+    'Debit',
+    'Credit',
+    'Net Amount',
+    'Tax Amount',
+    'Gross Amount',
+    'Tracking 1',
+    'Tracking 2'
+  ]];
 
-    sheet.getRange(1, 1, 1, 4).setValues([
-      ['Date', 'Source ID', 'Account', 'Net']
-    ]);
+  sheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
 
-    const rows = data.map(d => [d.date, d.sourceID, d.accountCode, d.netAmount]);
-
-    if (rows.length) {
-      sheet.getRange(2, 1, rows.length, 4).setValues(rows);
-    }
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, headers[0].length)
+      .setValues(rows);
   }
+}
 
   // ================= AUTH HELPERS =================
   function showAuthorizationUrl() {
