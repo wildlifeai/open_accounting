@@ -12,8 +12,6 @@ function XeroIntegration(config) {
 
     EXCLUDED_ACCOUNT_CODES: ['835', '600', '610', '800', '820', '877'],
 
-    SYNC_PROPERTY_KEY: 'XERO_LAST_SYNC',
-
     TEST_MODE: false
   };
 
@@ -74,7 +72,7 @@ function XeroIntegration(config) {
 
     try {
       const tenantId = getTenantId(service);
-      const startDate = getSyncStartDate();
+      const startDate = getStartDateFromSheet();
 
       log('Fetching from', startDate);
 
@@ -86,7 +84,8 @@ function XeroIntegration(config) {
       const filtered = filterTransactionsByTracking(
         journals,
         CONFIG.TRACKING_CATEGORY_NAME,
-        trackingValue
+        trackingValue,
+        startDate
       );
 
       log('Filtered transactions', filtered.length);
@@ -98,9 +97,7 @@ function XeroIntegration(config) {
 
       updateSheet(filtered);
 
-      // ✅ Only save sync if everything succeeded
-      props.setProperty(CONFIG.SYNC_PROPERTY_KEY, new Date().toISOString());
-
+      
       return `SUCCESS: ${filtered.length} transactions`;
 
     } catch (e) {
@@ -133,7 +130,7 @@ function XeroIntegration(config) {
     const fromDate = Utilities.formatDate(startDate, 'GMT', 'yyyy-MM-dd');
 
     while (true) {
-      const url = `${XERO_API_BASE}/Journals?offset=${offset}&if-modified-since=${fromDate}`;
+      const url = `${XERO_API_BASE}/Journals?offset=${offset}`;
 
       const res = fetchWithRetry(url, {
         headers: {
@@ -159,15 +156,6 @@ function XeroIntegration(config) {
   }
 
   // ================= SYNC DATE =================
-  function getSyncStartDate() {
-    const props = PropertiesService.getDocumentProperties();
-    const lastSync = props.getProperty(CONFIG.SYNC_PROPERTY_KEY);
-
-    if (lastSync) return new Date(lastSync);
-
-    return getStartDateFromSheet();
-  }
-
   function getStartDateFromSheet() {
     const sheet = SpreadsheetApp.getActiveSpreadsheet()
       .getSheetByName(CONFIG.DATE_SHEET_NAME);
@@ -177,7 +165,7 @@ function XeroIntegration(config) {
   }
 
   // ================= FILTER =================
-  function filterTransactionsByTracking(journals, name, value) {
+  function filterTransactionsByTracking(journals, name, value, startDate) {
   const rows = [];
 
   journals.forEach(j => {
@@ -186,6 +174,7 @@ function XeroIntegration(config) {
     const reference = j.Reference || '';
     const sourceID = j.SourceID || '';
     const date = parseXeroDate(j.JournalDate);
+    if (date < startDate) return;
 
     (j.JournalLines || []).forEach(l => {
       if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
