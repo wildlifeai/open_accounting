@@ -18,6 +18,9 @@ function XeroIntegration(config) {
   const XERO_API_BASE = 'https://api.xero.com/api.xro/2.0';
   const XERO_IDENTITY_URL = 'https://api.xero.com/connections';
 
+  // Cache for invoice item lookups (keyed by SourceID)
+  const itemCache = {};
+
   // ================= LOGGER =================
   function log(message, data = null) {
     Logger.log(JSON.stringify({
@@ -40,6 +43,42 @@ function XeroIntegration(config) {
         Utilities.sleep(1000 * (i + 1));
       }
     }
+  }
+
+  // ================= ITEM ENRICHMENT =================
+  function getItemCodes(service, tenantId, sourceType, sourceID) {
+    if (itemCache[sourceID]) return itemCache[sourceID];
+
+    // Only invoices (ACCPAY = bills, ACCREC = sales invoices) carry ItemCodes
+    if (sourceType !== 'ACCPAY' && sourceType !== 'ACCREC') {
+      itemCache[sourceID] = [''];
+      return itemCache[sourceID];
+    }
+
+    try {
+      const url = `${XERO_API_BASE}/Invoices/${sourceID}`;
+
+      const res = fetchWithRetry(url, {
+        headers: {
+          Authorization: 'Bearer ' + service.getAccessToken(),
+          'xero-tenant-id': tenantId
+        }
+      });
+
+      const data = JSON.parse(res.getContentText());
+      const invoice = data.Invoices[0];
+
+      const codes = (invoice.LineItems || [])
+        .map(li => li.ItemCode || '')
+        .filter(Boolean);
+
+      itemCache[sourceID] = codes.length ? codes : [''];
+    } catch (e) {
+      log('Failed to fetch item codes for ' + sourceID, e.message);
+      itemCache[sourceID] = [''];
+    }
+
+    return itemCache[sourceID];
   }
 
   // ================= AUTH =================
@@ -82,6 +121,8 @@ function XeroIntegration(config) {
       const trackingValue = ss.getName();
 
       const filtered = filterTransactionsByTracking(
+        service,
+        tenantId,
         journals,
         CONFIG.TRACKING_CATEGORY_NAME,
         trackingValue,
@@ -165,67 +206,74 @@ function XeroIntegration(config) {
   }
 
   // ================= FILTER =================
-  function filterTransactionsByTracking(journals, name, value, startDate) {
-  const rows = [];
+  function filterTransactionsByTracking(service, tenantId, journals, name, value, startDate) {
+    const rows = [];
 
-  journals.forEach(j => {
-    const journalNumber = j.JournalNumber || '';
-    const sourceType = j.SourceType || '';
-    const reference = j.Reference || '';
-    const sourceID = j.SourceID || '';
-    const date = parseXeroDate(j.JournalDate);
-    if (date < startDate) return;
+    journals.forEach(j => {
+      const journalNumber = j.JournalNumber || '';
+      const sourceType = j.SourceType || '';
+      const reference = j.Reference || '';
+      const sourceID = j.SourceID || '';
+      const date = parseXeroDate(j.JournalDate);
+      if (date < startDate) return;
 
-    (j.JournalLines || []).forEach(l => {
-      if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
+      (j.JournalLines || []).forEach(l => {
+        if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
 
-      // ✅ tracking match
-      const tracking = l.TrackingCategories || [];
+        // ✅ tracking match
+        const tracking = l.TrackingCategories || [];
 
-      const match = tracking.some(
-        t => t.Name === name && t.Option === value
-      );
+        const match = tracking.some(
+          t => t.Name === name && t.Option === value
+        );
 
-      if (!match) return;
+        if (!match) return;
 
-      const net = l.NetAmount || 0;
-      const tax = l.TaxAmount || 0;
-      const gross = net + tax;
+        const net = l.NetAmount || 0;
+        const tax = l.TaxAmount || 0;
+        const gross = net + tax;
 
-      const debit = net > 0 ? net : 0;
-      const credit = net < 0 ? Math.abs(net) : 0;
+        const debit = net > 0 ? net : 0;
+        const credit = net < 0 ? Math.abs(net) : 0;
 
-      // Format tracking nicely
-      const tracking1 = tracking[0]
-        ? `${tracking[0].Name}: ${tracking[0].Option}`
-        : '';
+        // Format tracking nicely
+        const tracking1 = tracking[0]
+          ? `${tracking[0].Name}: ${tracking[0].Option}`
+          : '';
 
-      const tracking2 = tracking[1]
-        ? `${tracking[1].Name}: ${tracking[1].Option}`
-        : '';
+        const tracking2 = tracking[1]
+          ? `${tracking[1].Name}: ${tracking[1].Option}`
+          : '';
 
-      rows.push([
-        date,
-        journalNumber,
-        reference,
-        sourceType,
-        sourceID,
-        l.AccountCode,
-        l.AccountName || '',
-        l.Description || '',
-        debit,
-        credit,
-        net,
-        tax,
-        gross,
-        tracking1,
-        tracking2
-      ]);
+        // Enrich with Product/Service (ItemCode) from source invoice
+        const itemCodes = getItemCodes(service, tenantId, sourceType, sourceID);
+
+        // Duplicate row per item code when multiple items exist on the source document
+        itemCodes.forEach(code => {
+          rows.push([
+            date,
+            journalNumber,
+            reference,
+            sourceType,
+            sourceID,
+            l.AccountCode,
+            l.AccountName || '',
+            code,              // Product/Service (ItemCode)
+            l.Description || '',
+            debit,
+            credit,
+            net,
+            tax,
+            gross,
+            tracking1,
+            tracking2
+          ]);
+        });
+      });
     });
-  });
 
-  return rows;
-}
+    return rows;
+  }
 
   // ================= DATE =================
   function parseXeroDate(x) {
@@ -250,6 +298,7 @@ function XeroIntegration(config) {
     'Source ID',
     'Account Code',
     'Account Name',
+    'Product/Service',
     'Description',
     'Debit',
     'Credit',
