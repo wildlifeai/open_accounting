@@ -81,6 +81,23 @@ function XeroIntegration(config) {
     return itemCache[sourceID];
   }
 
+  function extractProductService(description) {
+    if (!description) return '';
+
+    // Match pattern like WW_26_TOI_001
+    const match = description.match(/\b[A-Z]{2,}_[0-9]{2}_[A-Z]+_[0-9]{3}\b/);
+
+    return match ? match[0] : '';
+  }
+
+  function matchesSheetProject(code, sheetName) {
+    if (!code) return false;
+
+    // Check if the first three segments (e.g. WW_26_TOI) match the sheet name
+    const prefix = code.split('_').slice(0, 3).join('_');
+    return prefix === sheetName;
+  }
+
   // ================= AUTH =================
   function getXeroService() {
     return OAuth2.createService('xero')
@@ -246,7 +263,15 @@ function XeroIntegration(config) {
           : '';
 
         // Enrich with Product/Service (ItemCode) from source invoice
-        const itemCodes = getItemCodes(service, tenantId, sourceType, sourceID);
+        let itemCodes = getItemCodes(service, tenantId, sourceType, sourceID);
+
+        // Fallback to extraction from description if no ItemCodes found via API
+        if (!itemCodes.length || !itemCodes[0]) {
+          const extracted = extractProductService(l.Description);
+          // Validate against sheet name (value)
+          const code = matchesSheetProject(extracted, value) ? extracted : '';
+          itemCodes = [code];
+        }
 
         // Duplicate row per item code when multiple items exist on the source document
         itemCodes.forEach(code => {
@@ -258,7 +283,7 @@ function XeroIntegration(config) {
             sourceID,
             l.AccountCode,
             l.AccountName || '',
-            code,              // Product/Service (ItemCode)
+            code || '',              // Product/Service (with fallback)
             l.Description || '',
             debit,
             credit,
