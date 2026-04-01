@@ -185,6 +185,9 @@ function XeroIntegration(config) {
     let offset = 0;
     const pageSize = 100;
 
+    if (isNaN(startDate.getTime())) {
+      throw new Error('Invalid start date found in sheet. Please check cell ' + CONFIG.DATE_CELL);
+    }
     const fromDate = Utilities.formatDate(startDate, 'GMT', "yyyy-MM-dd'T'HH:mm:ss");
 
     while (true) {
@@ -235,6 +238,10 @@ function XeroIntegration(config) {
       const date = parseXeroDate(j.JournalDate);
       if (date < startDate) return;
 
+      // Pre-fetch item codes at journal level to avoid N+1 queries
+      // (sourceType/sourceID are the same for all lines in a journal)
+      const itemCodes = getItemCodes(service, tenantId, sourceType, sourceID);
+
       (j.JournalLines || []).forEach(l => {
         if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
 
@@ -263,19 +270,17 @@ function XeroIntegration(config) {
           ? `${tracking[1].Name}: ${tracking[1].Option}`
           : '';
 
-        // Enrich with Product/Service (ItemCode) from source invoice
-        let itemCodes = getItemCodes(service, tenantId, sourceType, sourceID);
+        // Use API item codes, fallback to extraction from description
+        let finalCodes = itemCodes;
 
-        // Fallback to extraction from description if no ItemCodes found via API
-        if (!itemCodes.length || !itemCodes[0]) {
+        if (!finalCodes.length || !finalCodes[0]) {
           const extracted = extractProductService(l.Description);
-          // Validate against sheet name (value)
           const code = matchesSheetProject(extracted, value) ? extracted : '';
-          itemCodes = [code];
+          finalCodes = [code];
         }
 
-        // Join item codes to avoid row duplication and financial data inflation
-        const itemCodeDisplay = itemCodes.filter(Boolean).join(', ');
+        // De-duplicate and join item codes
+        const itemCodeDisplay = [...new Set(finalCodes.filter(Boolean))].join(', ');
 
         rows.push([
           date,
