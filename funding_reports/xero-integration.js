@@ -81,6 +81,23 @@ function XeroIntegration(config) {
     return itemCache[sourceID];
   }
 
+  function extractProductService(description) {
+    if (!description) return '';
+
+    // Match pattern like WW_26_TOI_001
+    const match = description.match(/\b[A-Z]{2,}_[0-9]{2}_[A-Z]+_[0-9]{3}\b/);
+
+    return match ? match[0] : '';
+  }
+
+  function matchesSheetProject(code, sheetName) {
+    if (!code) return false;
+
+    // Check if the first three segments (e.g. WW_26_TOI) match the sheet name
+    const prefix = code.split('_').slice(0, 3).join('_');
+    return prefix === sheetName;
+  }
+
   // ================= AUTH =================
   function getXeroService() {
     return OAuth2.createService('xero')
@@ -168,7 +185,10 @@ function XeroIntegration(config) {
     let offset = 0;
     const pageSize = 100;
 
-    const fromDate = Utilities.formatDate(startDate, 'GMT', 'yyyy-MM-dd');
+    if (isNaN(startDate.getTime())) {
+      throw new Error('Invalid start date found in sheet. Please check cell ' + CONFIG.DATE_CELL);
+    }
+    const fromDate = Utilities.formatDate(startDate, 'GMT', "yyyy-MM-dd'T'HH:mm:ss");
 
     while (true) {
       const url = `${XERO_API_BASE}/Journals?offset=${offset}`;
@@ -176,7 +196,8 @@ function XeroIntegration(config) {
       const res = fetchWithRetry(url, {
         headers: {
           Authorization: 'Bearer ' + service.getAccessToken(),
-          'xero-tenant-id': tenantId
+          'xero-tenant-id': tenantId,
+          'If-Modified-Since': fromDate
         }
       });
 
@@ -217,6 +238,10 @@ function XeroIntegration(config) {
       const date = parseXeroDate(j.JournalDate);
       if (date < startDate) return;
 
+      // Pre-fetch item codes at journal level to avoid N+1 queries
+      // (sourceType/sourceID are the same for all lines in a journal)
+      const itemCodes = getItemCodes(service, tenantId, sourceType, sourceID);
+
       (j.JournalLines || []).forEach(l => {
         if (CONFIG.EXCLUDED_ACCOUNT_CODES.includes(l.AccountCode)) return;
 
@@ -245,30 +270,36 @@ function XeroIntegration(config) {
           ? `${tracking[1].Name}: ${tracking[1].Option}`
           : '';
 
-        // Enrich with Product/Service (ItemCode) from source invoice
-        const itemCodes = getItemCodes(service, tenantId, sourceType, sourceID);
+        // Use API item codes, fallback to extraction from description
+        let finalCodes = itemCodes;
 
-        // Duplicate row per item code when multiple items exist on the source document
-        itemCodes.forEach(code => {
-          rows.push([
-            date,
-            journalNumber,
-            reference,
-            sourceType,
-            sourceID,
-            l.AccountCode,
-            l.AccountName || '',
-            code,              // Product/Service (ItemCode)
-            l.Description || '',
-            debit,
-            credit,
-            net,
-            tax,
-            gross,
-            tracking1,
-            tracking2
-          ]);
-        });
+        if (!finalCodes.length || !finalCodes[0]) {
+          const extracted = extractProductService(l.Description);
+          const code = matchesSheetProject(extracted, value) ? extracted : '';
+          finalCodes = [code];
+        }
+
+        // De-duplicate and join item codes
+        const itemCodeDisplay = [...new Set(finalCodes.filter(Boolean))].join(', ');
+
+        rows.push([
+          date,
+          journalNumber,
+          reference,
+          sourceType,
+          sourceID,
+          l.AccountCode,
+          l.AccountName || '',
+          itemCodeDisplay,
+          l.Description || '',
+          debit,
+          credit,
+          net,
+          tax,
+          gross,
+          tracking1,
+          tracking2
+        ]);
       });
     });
 
