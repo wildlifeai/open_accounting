@@ -132,8 +132,11 @@ function refreshScript() {
 
 // ================= AUTO SYNC =================
 function setupAutoSync() {
-  ScriptApp.newTrigger('runUpdate')
-    .timeBased()
-    .everyHours(1)
-    .create();
+  const triggers = ScriptApp.getProjectTriggers();
+  if (!triggers.some(t => t.getHandlerFunction() === 'runUpdate')) {
+    ScriptApp.newTrigger('runUpdate')
+      .timeBased()
+      .everyHours(1)
+      .create();
+  }
 }

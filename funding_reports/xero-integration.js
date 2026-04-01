@@ -185,7 +185,7 @@ function XeroIntegration(config) {
     let offset = 0;
     const pageSize = 100;
 
-    const fromDate = Utilities.formatDate(startDate, 'GMT', 'yyyy-MM-dd');
+    const fromDate = Utilities.formatDate(startDate, 'GMT', "yyyy-MM-dd'T'HH:mm:ss");
 
     while (true) {
       const url = `${XERO_API_BASE}/Journals?offset=${offset}`;
@@ -193,7 +193,8 @@ function XeroIntegration(config) {
       const res = fetchWithRetry(url, {
         headers: {
           Authorization: 'Bearer ' + service.getAccessToken(),
-          'xero-tenant-id': tenantId
+          'xero-tenant-id': tenantId,
+          'If-Modified-Since': fromDate
         }
       });
 
@@ -273,27 +274,27 @@ function XeroIntegration(config) {
           itemCodes = [code];
         }
 
-        // Duplicate row per item code when multiple items exist on the source document
-        itemCodes.forEach(code => {
-          rows.push([
-            date,
-            journalNumber,
-            reference,
-            sourceType,
-            sourceID,
-            l.AccountCode,
-            l.AccountName || '',
-            code || '',              // Product/Service (with fallback)
-            l.Description || '',
-            debit,
-            credit,
-            net,
-            tax,
-            gross,
-            tracking1,
-            tracking2
-          ]);
-        });
+        // Join item codes to avoid row duplication and financial data inflation
+        const itemCodeDisplay = itemCodes.filter(Boolean).join(', ');
+
+        rows.push([
+          date,
+          journalNumber,
+          reference,
+          sourceType,
+          sourceID,
+          l.AccountCode,
+          l.AccountName || '',
+          itemCodeDisplay,
+          l.Description || '',
+          debit,
+          credit,
+          net,
+          tax,
+          gross,
+          tracking1,
+          tracking2
+        ]);
       });
     });
 
