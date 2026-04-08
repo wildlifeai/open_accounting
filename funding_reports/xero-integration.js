@@ -294,6 +294,15 @@ function XeroIntegration(config) {
         // De-duplicate and join item codes
         const itemCodeDisplay = [...new Set(finalCodes.filter(Boolean))].join(', ');
 
+        log('Row Display Diagnostic', {
+          accountName: l.AccountName || '',
+          description: l.Description || '',
+          itemCodesFromApi: itemCodes,
+          finalCodesMatched: finalCodes,
+          itemCodeDisplay: itemCodeDisplay,
+          trackingValue: value
+        });
+
         rows.push([
           date,
           journalNumber,
