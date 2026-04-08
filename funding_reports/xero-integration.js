@@ -275,7 +275,12 @@ function XeroIntegration(config) {
 
         if (!finalCodes.length || !finalCodes[0]) {
           const extracted = extractProductService(l.Description);
-          const code = matchesSheetProject(extracted, value) ? extracted : '';
+          let code = matchesSheetProject(extracted, value) ? extracted : '';
+          
+          if (!code && l.Description && l.Description.includes(' - ')) {
+            code = l.Description.split(' - ')[0].trim();
+          }
+
           finalCodes = [code];
         }
 
