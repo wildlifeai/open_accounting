@@ -275,12 +275,38 @@ function XeroIntegration(config) {
 
         if (!finalCodes.length || !finalCodes[0]) {
           const extracted = extractProductService(l.Description);
-          const code = matchesSheetProject(extracted, value) ? extracted : '';
+          let code = matchesSheetProject(extracted, value) ? extracted : '';
+          
+          if (!code && l.Description) {
+            let potentialCode = '';
+            // Split by hyphen, en-dash, or em-dash, handling variable spaces
+            const dashMatch = l.Description.match(/^(.*?)\s*[-–—]/);
+            if (dashMatch && dashMatch[1]) {
+              potentialCode = dashMatch[1].trim();
+            } else if (l.Description.includes('_')) {
+              // Extreme fallback: if there's no dash but there are underscores (like WW_25)
+              potentialCode = l.Description.split(' ')[0].trim();
+            }
+            
+            if (potentialCode && matchesSheetProject(potentialCode, value)) {
+              code = potentialCode;
+            }
+          }
+
           finalCodes = [code];
         }
 
         // De-duplicate and join item codes
         const itemCodeDisplay = [...new Set(finalCodes.filter(Boolean))].join(', ');
+
+        log('Row Display Diagnostic', {
+          accountName: l.AccountName || '',
+          description: l.Description || '',
+          itemCodesFromApi: itemCodes,
+          finalCodesMatched: finalCodes,
+          itemCodeDisplay: itemCodeDisplay,
+          trackingValue: value
+        });
 
         rows.push([
           date,
