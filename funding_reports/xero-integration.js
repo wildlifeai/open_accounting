@@ -277,8 +277,15 @@ function XeroIntegration(config) {
           const extracted = extractProductService(l.Description);
           let code = matchesSheetProject(extracted, value) ? extracted : '';
           
-          if (!code && l.Description && l.Description.includes(' - ')) {
-            code = l.Description.split(' - ')[0].trim();
+          if (!code && l.Description) {
+            // Split by hyphen, en-dash, or em-dash, handling variable spaces
+            const dashMatch = l.Description.match(/^(.*?)\s*[-–—]/);
+            if (dashMatch && dashMatch[1]) {
+              code = dashMatch[1].trim();
+            } else if (l.Description.includes('_')) {
+              // Extreme fallback: if there's no dash but there are underscores (like WW_25)
+              code = l.Description.split(' ')[0].trim();
+            }
           }
 
           finalCodes = [code];
