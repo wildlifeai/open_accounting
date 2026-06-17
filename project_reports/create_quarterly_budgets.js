@@ -20,17 +20,18 @@ function QuarterlyBudgetsIntegration(PRIVATE_CONFIG) {
 
   // ===================== OAUTH2 & XERO API =====================
   function getXeroService() {
+    const props = PropertiesService.getDocumentProperties() || PropertiesService.getScriptProperties();
     return OAuth2.createService('xero')
       .setAuthorizationBaseUrl('https://login.xero.com/identity/connect/authorize')
       .setTokenUrl('https://identity.xero.com/connect/token')
-      .setClientId(PRIVATE_CONFIG.XERO_CLIENT_ID)
-      .setClientSecret(PRIVATE_CONFIG.XERO_CLIENT_SECRET)
+      .setClientId(PRIVATE_CONFIG.CLIENT_ID)
+      .setClientSecret(PRIVATE_CONFIG.CLIENT_SECRET)
       .setCallbackFunction('authCallback')
-      .setPropertyStore(PropertiesService.getDocumentProperties())
+      .setPropertyStore(props)
       .setScope('offline_access accounting.settings.read accounting.reports.read accounting.transactions.read')
       .setParam('response_type', 'code')
       .setTokenHeaders({
-        Authorization: 'Basic ' + Utilities.base64Encode(PRIVATE_CONFIG.XERO_CLIENT_ID + ':' + PRIVATE_CONFIG.XERO_CLIENT_SECRET)
+        Authorization: 'Basic ' + Utilities.base64Encode(PRIVATE_CONFIG.CLIENT_ID + ':' + PRIVATE_CONFIG.CLIENT_SECRET)
       });
   }
 

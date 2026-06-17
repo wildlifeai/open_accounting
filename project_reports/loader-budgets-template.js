@@ -6,11 +6,11 @@
 // DO NOT commit this file to GitHub after adding your credentials!
 
 const PRIVATE_CONFIG = {
-  XERO_CLIENT_ID: 'YOUR_CLIENT_ID',
-  XERO_CLIENT_SECRET: 'YOUR_CLIENT_SECRET',
+  CLIENT_ID: 'YOUR_CLIENT_ID',
+  CLIENT_SECRET: 'YOUR_CLIENT_SECRET',
   REDIRECT_URI: 'https://script.google.com/macros/d/YOUR_SCRIPT_ID/usercallback',
 
-  GITHUB_SCRIPT_URL: 'https://raw.githubusercontent.com/wildlifeai/open_accounting/refs/heads/main/project_reports/create_quarterly_budgets.js'
+  GITHUB_SCRIPT_URL: 'https://raw.githubusercontent.com/wildlifeai/open_accounting/refs/heads/feature/budget_xero/project_reports/create_quarterly_budgets.js'
 };
 
 // Cache key for the script code
@@ -18,7 +18,7 @@ const CACHE_KEY = 'BUDGETS_SCRIPT_CACHE';
 
 // ================= LOAD SCRIPT =================
 function loadBudgetsModule() {
-  const props = PropertiesService.getDocumentProperties();
+  const props = PropertiesService.getDocumentProperties() || PropertiesService.getScriptProperties();
   let code = props.getProperty(CACHE_KEY);
 
   if (!code) {
@@ -66,6 +66,7 @@ function generateAndUploadQuarterlyBudgets() {
  * Helper to force a code update from GitHub by clearing the cache
  */
 function updateScriptFromGitHub() {
-  PropertiesService.getDocumentProperties().deleteProperty(CACHE_KEY);
+  const props = PropertiesService.getDocumentProperties() || PropertiesService.getScriptProperties();
+  props.deleteProperty(CACHE_KEY);
   Logger.log("Cache cleared. Next run will fetch latest code from GitHub.");
 }
