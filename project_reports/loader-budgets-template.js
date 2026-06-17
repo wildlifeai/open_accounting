@@ -78,3 +78,16 @@ function testLoader() {
   Logger.log(PropertiesService.getDocumentProperties());
   Logger.log(PropertiesService.getScriptProperties());
 }
+
+/**
+ * Dummy function to force Apps Script to request necessary permissions.
+ * You do not need to run this function. The Apps Script analyzer will see
+ * these calls and prompt you for Drive and Spreadsheet permissions.
+ */
+function _forcePermissions() {
+  if (false) {
+    SpreadsheetApp.openById('');
+    SpreadsheetApp.create('');
+    DriveApp.getFolderById('');
+  }
+}
