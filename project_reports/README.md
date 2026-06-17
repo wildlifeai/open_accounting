@@ -28,6 +28,11 @@ Currently, the native Xero API **does not support POST/PUT requests for Budgets*
 
 To run this in Google Apps Script:
 1. Open Google Apps Script.
-2. Add `create_quarterly_budgets.js` to your project.
+2. Copy `loader-budgets-template.js` to your project and add your credentials.
 3. Make sure the Google services required are enabled (DriveApp, SpreadsheetApp).
-4. Run the `generateAndUploadQuarterlyBudgets` function.
+4. **Add the OAuth2 Library:**
+   - Click the "+" next to "Libraries" in the left sidebar.
+   - Enter Script ID: `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF`
+   - Click "Look up", select the latest version, keep identifier as `OAuth2`, and click "Add".
+5. Run the `showAuthorizationUrl` function to authenticate with Xero.
+6. Run the `generateAndUploadQuarterlyBudgets` function to generate the CSV budgets and verify diffs.
