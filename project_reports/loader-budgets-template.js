@@ -70,3 +70,11 @@ function updateScriptFromGitHub() {
   props.deleteProperty(CACHE_KEY);
   Logger.log("Cache cleared. Next run will fetch latest code from GitHub.");
 }
+
+/**
+ * Quick test to verify which PropertiesService is available in the current environment
+ */
+function testLoader() {
+  Logger.log(PropertiesService.getDocumentProperties());
+  Logger.log(PropertiesService.getScriptProperties());
+}

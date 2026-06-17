@@ -76,7 +76,7 @@ function QuarterlyBudgetsIntegration(PRIVATE_CONFIG) {
   }
 
   // ===================== MAIN SCRIPT =====================
-  async function generateAndUploadQuarterlyBudgets() {
+  function generateAndUploadQuarterlyBudgets() {
     Logger.log("Starting Quarterly Budgets Generation...");
     
     const service = getXeroService();
