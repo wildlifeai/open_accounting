@@ -1,0 +1,245 @@
+<script>
+  var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function fmtMoney(n) {
+    return '$' + (Number(n) || 0).toLocaleString('en-NZ', { maximumFractionDigits: 0 });
+  }
+  function fmtMonthKey(key) {
+    if (!key) return '';
+    var p = key.split('-');
+    return MONTHS[parseInt(p[1], 10) - 1] + ' ' + p[0];
+  }
+  function ago(iso) {
+    var mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 60) return mins + 'm ago';
+    var h = Math.round(mins / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.round(h / 24) + 'd ago';
+  }
+  var COLOR = { ok: 'var(--green)', warn: 'var(--amber)', danger: 'var(--red)' };
+  var snapshot = null;
+
+  function render(s) {
+    snapshot = s;
+    document.getElementById('sync-label').textContent =
+      'synced ' + ago(s.generatedAt);
+
+    var warn = document.getElementById('xero-warning');
+    if (s.xeroConnected) { warn.classList.add('hidden'); }
+    else {
+      warn.classList.remove('hidden');
+      google.script.run.withSuccessHandler(function (st) {
+        if (st.authUrl) document.getElementById('xero-link').href = st.authUrl;
+      }).apiXeroStatus();
+    }
+
+    var t = s.totals;
+    document.getElementById('totals').innerHTML =
+      card('Total forecast budget', fmtMoney(t.budget)) +
+      card('Secured funding', fmtMoney(t.secured)) +
+      card('Actual to date', fmtMoney(t.actual)) +
+      card('Unsecured gap', fmtMoney(t.unsecuredGap), 'danger');
+
+    renderBreakdown();
+
+    document.getElementById('flags').innerHTML =
+      s.dataFlags.map(function (f) { return '<div>⚠ ' + f + '</div>'; }).join('');
+  }
+
+  var DIM_LABEL = { project: 'Project', fundingSource: 'Funding source', status: 'Status' };
+
+  function selectedDims() {
+    return Array.prototype.slice.call(document.querySelectorAll('.bd-dim:checked'))
+      .map(function (c) { return c.value; });
+  }
+
+  function renderBreakdown() {
+    if (!snapshot) return;
+    var dims = selectedDims();
+    var rows = snapshot.breakdownRows || [];
+
+    // Group by the chosen dimensions (or one "All" group if none chosen).
+    var groups = {};
+    rows.forEach(function (r) {
+      var key = dims.length ? dims.map(function (d) { return r[d]; }).join(' › ') : 'All';
+      if (!groups[key]) {
+        groups[key] = { label: key, dimVals: dims.map(function (d) { return r[d]; }),
+          budget: 0, secured: 0, actual: 0 };
+      }
+      groups[key].budget += r.budget;
+      groups[key].secured += r.secured;
+      groups[key].actual += r.actual;
+    });
+
+    var list = Object.keys(groups).map(function (k) { return groups[k]; })
+      .sort(function (a, b) { return b.budget - a.budget; });
+
+    var head = '<tr>' +
+      (dims.length ? dims.map(function (d) { return '<th>' + DIM_LABEL[d] + '</th>'; }).join('')
+                   : '<th>All funding</th>') +
+      '<th class="num">Budget</th><th class="num">Secured</th>' +
+      '<th class="num">Actual</th><th>Spent vs budget</th></tr>';
+    document.getElementById('overview-head').innerHTML = head;
+
+    document.getElementById('overview-body').innerHTML = list.map(function (g) {
+      var pct = g.budget > 0 ? Math.round((g.actual / g.budget) * 100) : 0;
+      var over = pct > 100;
+      var color = over ? COLOR.danger : COLOR.ok;
+      var dimCells = dims.length
+        ? g.dimVals.map(function (v) { return '<td>' + statusLabel(v) + '</td>'; }).join('')
+        : '<td>All funding</td>';
+      return '<tr>' + dimCells +
+        '<td class="num">' + fmtMoney(g.budget) + '</td>' +
+        '<td class="num">' + fmtMoney(g.secured) + '</td>' +
+        '<td class="num">' + fmtMoney(g.actual) + '</td>' +
+        '<td><div class="bar-row"><div class="bar"><span style="width:' + Math.min(100, pct) +
+          '%;background:' + color + '"></span></div>' +
+          '<span class="pct">' + pct + '%</span></div></td></tr>';
+    }).join('');
+  }
+
+  function statusLabel(v) {
+    if (v === 'secured') return 'Secured (confirmed)';
+    if (v === 'proposed') return 'Proposed';
+    return v;
+  }
+
+  Array.prototype.slice.call(document.querySelectorAll('.bd-dim')).forEach(function (c) {
+    c.addEventListener('change', renderBreakdown);
+  });
+
+  function card(label, value, cls) {
+    return '<div class="card"><div class="label">' + label + '</div>' +
+      '<div class="value ' + (cls || '') + '">' + value + '</div></div>';
+  }
+
+  function load(force) {
+    var btn = document.getElementById('refresh');
+    btn.disabled = true; btn.textContent = force ? 'Refreshing…' : 'Refresh now';
+    var call = google.script.run
+      .withSuccessHandler(function (s) { render(s); btn.disabled = false; btn.textContent = 'Refresh now'; })
+      .withFailureHandler(function (e) {
+        document.getElementById('sync-label').textContent = 'error: ' + e.message;
+        btn.disabled = false; btn.textContent = 'Refresh now';
+      });
+    force ? call.apiRefresh() : call.apiGetSnapshot();
+  }
+
+  document.getElementById('refresh').addEventListener('click', function () { load(true); });
+  load(false);
+
+  // ---- Quarterly tracking view --------------------------------------------
+
+  var tracksLoaded = false;
+
+  function switchView(view) {
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.classList.toggle('active', t.dataset.view === view);
+    });
+    document.getElementById('view-overview').classList.toggle('hidden', view !== 'overview');
+    document.getElementById('view-tracking').classList.toggle('hidden', view !== 'tracking');
+    if (view === 'tracking' && !tracksLoaded) { tracksLoaded = true; loadSources(); }
+  }
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () { switchView(t.dataset.view); });
+  });
+
+  function loadSources() {
+    var sel = document.getElementById('source-select');
+    sel.innerHTML = '<option>loading…</option>';
+    google.script.run.withSuccessHandler(function (list) {
+      if (!list.length) { sel.innerHTML = '<option>no funding sources</option>'; return; }
+      sel.innerHTML = list.map(function (s) {
+        return '<option value="' + s.source + '">' + s.source +
+          ' (' + s.status + ' · ' + s.project + ')</option>';
+      }).join('');
+      sel.onchange = function () { loadTracking(sel.value); };
+      loadTracking(list[0].source);
+    }).withFailureHandler(trackError).apiListSources();
+  }
+
+  function loadTracking(source) {
+    document.getElementById('track-status').textContent = 'loading ' + source + '…';
+    google.script.run.withSuccessHandler(renderTracking)
+      .withFailureHandler(trackError).apiGetTracking(source);
+  }
+
+  function trackError(e) {
+    document.getElementById('track-status').textContent = 'error: ' + e.message;
+  }
+
+  function renderTracking(t) {
+    document.getElementById('track-status').textContent =
+      t.status + ' · ' + t.project + ' · current ' + t.currentQuarter;
+
+    var head = '<thead><tr><th class="mile">Milestone</th>' +
+      t.quarters.map(function (q) {
+        var cur = q === t.currentQuarter ? ' cur' : '';
+        return '<th class="' + cur.trim() + '">' + q + '</th>';
+      }).join('') +
+      '<th class="tot">Budget</th><th class="tot">Actual</th>' +
+      '<th class="tot">Expected</th><th class="tot">Variance</th></tr></thead>';
+
+    var body = '<tbody>' + t.milestones.map(function (m) {
+      var cells = m.cells.map(function (c) {
+        var cur = c.quarter === t.currentQuarter ? ' cur' : '';
+        if (c.editable) {
+          return '<td class="' + cur.trim() + '"><div class="cell-q">' +
+            '<input class="fc' + (c.hasOverride ? ' override' : '') + '" type="number" ' +
+            'value="' + Math.round(c.forecast) + '" ' +
+            'data-item="' + m.item + '" data-mile="' + esc(m.milestone) + '" ' +
+            'data-q="' + c.quarter + '" data-base="' + Math.round(c.baseline) + '">' +
+            '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
+        }
+        return '<td class="' + cur.trim() + '"><div class="cell-q">' +
+          '<span class="cell-actual">' + money0(c.actual) + '</span>' +
+          '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
+      }).join('');
+      return '<tr><td class="mile">' + m.milestone + '</td>' + cells +
+        '<td class="tot">' + money0(m.baselineTotal) + '</td>' +
+        '<td class="tot">' + money0(m.actualToDate) + '</td>' +
+        '<td class="tot">' + money0(m.expectedTotal) + '</td>' +
+        '<td class="tot ' + varClass(m.variance) + '">' + signed(m.variance) + '</td></tr>';
+    }).join('') + '</tbody>';
+
+    var foot = '<tfoot><tr><td class="mile">Total</td>' +
+      t.colTotals.map(function (c) {
+        var cur = c.quarter === t.currentQuarter ? ' cur' : '';
+        var val = quarterIsPast(c.quarter, t.currentQuarter) ? c.actual : c.effective;
+        return '<td class="' + cur.trim() + '">' + money0(val) + '</td>';
+      }).join('') +
+      '<td class="tot">' + money0(t.totals.baseline) + '</td>' +
+      '<td class="tot">' + money0(t.totals.actual) + '</td>' +
+      '<td class="tot">' + money0(t.totals.expected) + '</td>' +
+      '<td class="tot ' + varClass(t.totals.variance) + '">' + signed(t.totals.variance) + '</td></tr></tfoot>';
+
+    document.getElementById('track-grid').innerHTML = head + body + foot;
+
+    document.getElementById('track-totals').innerHTML =
+      tot('Budget', money0(t.totals.baseline)) +
+      tot('Actual to date', money0(t.totals.actual)) +
+      tot('Expected (actual + forecast)', money0(t.totals.expected)) +
+      tot('Variance vs budget', '<span class="' + varClass(t.totals.variance) + '">' +
+        signed(t.totals.variance) + '</span>');
+
+    document.querySelectorAll('input.fc').forEach(function (inp) {
+      inp.addEventListener('change', function () { saveForecast(t.source, inp); });
+    });
+  }
+
+  function saveForecast(source, inp) {
+    var raw = inp.value.trim();
+    var cost = raw === '' ? null : Number(raw);
+    document.getElementById('track-status').textContent = 'saving…';
+    google.script.run.withSuccessHandler(renderTracking).withFailureHandler(trackError)
+      .apiSaveForecast(source, inp.dataset.mile, inp.dataset.item, inp.dataset.q, cost);
+  }
+
+  function quarterIsPast(q, cur) { return qNum(q) < qNum(cur); }
+  function qNum(label) { var p = label.split(' Q'); return parseInt(p[0], 10) * 4 + parseInt(p[1], 10); }
+  function money0(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('en-NZ'); }
+  function signed(n) { n = Math.round(n); return (n > 0 ? '+' : '') + money0(n).replace('$-', '-$'); }
+  function varClass(n) { return n > 0 ? 'var-pos' : (n < 0 ? 'var-neg' : ''); }
+  function tot(label, val) { return '<span><span class="lbl">' + label + '</span>' + val + '</span>'; }
+  function esc(s) { return String(s).replace(/"/g, '&quot;'); }
+</script>
