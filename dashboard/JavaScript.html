@@ -33,12 +33,10 @@
       }).apiXeroStatus();
     }
 
-    var t = s.totals;
-    document.getElementById('totals').innerHTML =
-      card('Total forecast budget', fmtMoney(t.budget)) +
-      card('Secured funding', fmtMoney(t.secured)) +
-      card('Actual to date', fmtMoney(t.actual)) +
-      card('Unsecured gap', fmtMoney(t.unsecuredGap), 'danger');
+    var isFy = document.getElementById('bd-restrict-fy') ? document.getElementById('bd-restrict-fy').checked : false;
+    
+    // #totals are now updated inside renderBreakdown() so they match the filtered selection
+
 
     renderCoverage(s.coverage);
     buildFilters();
@@ -107,6 +105,7 @@
 
   function renderBreakdown() {
     if (!snapshot) return;
+    var isFy = document.getElementById('bd-restrict-fy') ? document.getElementById('bd-restrict-fy').checked : false;
     var dims = selectedDims();
     var statuses = selectedStatuses();
     var projects = selectedValues('filter-projects');
@@ -114,26 +113,29 @@
     var rows = (snapshot.breakdownRows || []).filter(function (r) {
       if (projects.indexOf(r.project) === -1) return false;
       if (sources.indexOf(r.fundingSource) === -1) return false;
-      // Keep rows whose status is ticked; rows with an unrecognised status
-      // (e.g. unmatched Xero actuals) always show so nothing is silently hidden.
       if (r.status === 'secured' || r.status === 'proposed') {
         return statuses.indexOf(r.status) !== -1;
       }
       return true;
     });
 
-    // Group by the chosen dimensions (or one "All" group if none chosen).
     var groups = {};
+    var minStart = null, maxEnd = null;
     rows.forEach(function (r) {
+      if (r.start && (!minStart || r.start < minStart)) minStart = r.start;
+      if (r.end && (!maxEnd || r.end > maxEnd)) maxEnd = r.end;
+
       var key = dims.length ? dims.map(function (d) { return r[d]; }).join(' › ') : 'All';
       if (!groups[key]) {
         groups[key] = { label: key, dimVals: dims.map(function (d) { return r[d]; }),
           budget: 0, secured: 0, actual: 0 };
       }
-      groups[key].budget += r.budget;
-      groups[key].secured += r.secured;
-      groups[key].actual += r.actual;
+      groups[key].budget += isFy ? (r.budgetFY || 0) : r.budget;
+      groups[key].secured += isFy ? (r.securedFY || 0) : r.secured;
+      groups[key].actual += isFy ? (r.actualFY || 0) : r.actual;
     });
+
+    renderCoverage(snapshot.coverage, minStart, maxEnd);
 
     var list = Object.keys(groups).map(function (k) { return groups[k]; })
       .sort(function (a, b) { return b.budget - a.budget; });
@@ -160,6 +162,32 @@
           '%;background:' + color + '"></span></div>' +
           '<span class="pct">' + pct + '%</span></div></td></tr>';
     }).join('');
+
+    var totBudget = 0, totSecured = 0, totActual = 0;
+    list.forEach(function (g) {
+      totBudget += g.budget;
+      totSecured += g.secured;
+      totActual += g.actual;
+    });
+    var totPct = totBudget > 0 ? Math.round((totActual / totBudget) * 100) : 0;
+    var totColor = totPct > 100 ? COLOR.danger : COLOR.ok;
+    var footCols = dims.length ? dims.length : 1;
+    
+    // Update the TOP Organisation Overview cards so they exactly match the filtered Breakdown
+    document.getElementById('totals').innerHTML =
+      card((isFy ? 'FY forecast budget' : 'Total forecast budget'), fmtMoney(totBudget)) +
+      card((isFy ? 'FY secured funding' : 'Secured funding'), fmtMoney(totSecured)) +
+      card((isFy ? 'FY actual to date' : 'Actual to date'), fmtMoney(totActual)) +
+      card((isFy ? 'FY unsecured gap' : 'Unsecured gap'), fmtMoney(Math.max(0, totBudget - totSecured)), 'danger');
+
+    var foot = '<tr><td colspan="' + footCols + '">Total</td>' +
+      '<td class="num">' + fmtMoney(totBudget) + '</td>' +
+      '<td class="num">' + fmtMoney(totSecured) + '</td>' +
+      '<td class="num">' + fmtMoney(totActual) + '</td>' +
+      '<td><div class="bar-row"><div class="bar"><span style="width:' + Math.min(100, totPct) +
+      '%;background:' + totColor + '"></span></div>' +
+      '<span class="pct">' + totPct + '%</span></div></td></tr>';
+    document.getElementById('overview-foot').innerHTML = foot;
   }
 
   function statusLabel(v) {
@@ -168,8 +196,12 @@
     return v;
   }
 
-  Array.prototype.slice.call(document.querySelectorAll('.bd-dim, .bd-status')).forEach(function (c) {
-    c.addEventListener('change', renderBreakdown);
+  Array.prototype.slice.call(document.querySelectorAll('.bd-dim, .bd-status, #bd-restrict-fy')).forEach(function (c) {
+    if (c.id === 'bd-restrict-fy') {
+      c.addEventListener('change', function() { render(snapshot); });
+    } else {
+      c.addEventListener('change', renderBreakdown);
+    }
   });
 
   Array.prototype.slice.call(document.querySelectorAll('.bd-dd-actions a')).forEach(function (a) {
@@ -178,8 +210,13 @@
       var id = a.dataset.target, on = a.dataset.act === 'all';
       Array.prototype.slice.call(document.querySelectorAll('#' + id + ' input'))
         .forEach(function (i) { i.checked = on; });
-      updateFilterSummary(id);
-      renderBreakdown();
+      if (id === 'track-sources') {
+        updateTrackFilterSummary();
+        loadTrackingSelected();
+      } else {
+        updateFilterSummary(id);
+        renderBreakdown();
+      }
     });
   });
 
@@ -212,17 +249,19 @@
     var d = new Date(iso);
     return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
   }
-  function renderCoverage(c) {
+  function renderCoverage(c, overrideStart, overrideEnd) {
     var el = document.getElementById('coverage');
     if (!c) { el.innerHTML = ''; return; }
+    var start = overrideStart || c.forecastStart;
+    var end = overrideEnd || c.forecastEnd;
     el.innerHTML =
       '<span>Financial year <b>' + c.fyLabel + '</b> (' + monthYear(c.fyStart) +
         ' – ' + monthYear(c.fyEnd) + ')</span>' +
       '<span class="sep">·</span>' +
       '<span>Today <b>' + dayMonthYear(c.today) + '</b></span>' +
       '<span class="sep">·</span>' +
-      '<span>Budgeted &amp; forecast <b>' + monthYear(c.forecastStart) +
-        ' – ' + monthYear(c.forecastEnd) + '</b></span>';
+      '<span>Budgeted &amp; forecast <b>' + monthYear(start) +
+        ' – ' + monthYear(end) + '</b></span>';
   }
 
   function load(force) {
@@ -256,7 +295,7 @@
     t.addEventListener('click', function () { switchView(t.dataset.view); });
   });
 
-  var currentEntityId = null;
+  var currentEntityIds = [];
   var currentMeasure = 'cost';
 
   Array.prototype.slice.call(document.querySelectorAll('.measure')).forEach(function (b) {
@@ -265,7 +304,7 @@
       document.querySelectorAll('.measure').forEach(function (x) {
         x.classList.toggle('active', x === b);
       });
-      if (currentEntityId) loadTracking(currentEntityId);
+      if (currentEntityIds && currentEntityIds.length) loadTracking(currentEntityIds);
     });
   });
 
@@ -276,23 +315,59 @@
   };
 
   function loadSources() {
-    var sel = document.getElementById('source-select');
-    sel.innerHTML = '<option>loading…</option>';
+    var box = document.getElementById('track-sources');
+    var sum = document.getElementById('track-sources-sum');
+    sum.textContent = 'loading…';
     google.script.run.withSuccessHandler(function (list) {
-      if (!list.length) { sel.innerHTML = '<option>nothing to track</option>'; return; }
-      sel.innerHTML = list.map(function (s) {
-        return '<option value="' + esc(s.id) + '">' + s.label + '</option>';
+      if (!list.length) { sum.textContent = 'nothing to track'; return; }
+      box.innerHTML = list.map(function (s) {
+        return '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + s.label + '</label>';
       }).join('');
-      sel.onchange = function () { loadTracking(sel.value); };
-      loadTracking(list[0].id);
+      box.querySelector('input').checked = true;
+      
+      Array.prototype.slice.call(box.querySelectorAll('input')).forEach(function (i) {
+        i.addEventListener('change', function () { 
+          updateTrackFilterSummary(); 
+          loadTrackingSelected();
+        });
+      });
+      updateTrackFilterSummary();
+      loadTrackingSelected();
     }).withFailureHandler(trackError).apiListSources();
   }
 
-  function loadTracking(id) {
-    currentEntityId = id;
+  function updateTrackFilterSummary() {
+    var box = document.getElementById('track-sources');
+    var all = box.querySelectorAll('input');
+    var on = box.querySelectorAll('input:checked');
+    var sum = document.getElementById('track-sources-sum');
+    if (on.length === 0) sum.textContent = 'Select sources...';
+    else if (on.length === 1) {
+      sum.textContent = on[0].parentElement.textContent.trim();
+    } else if (on.length === all.length) {
+      sum.textContent = 'All sources';
+    } else {
+      sum.textContent = on.length + ' sources selected';
+    }
+  }
+
+  function loadTrackingSelected() {
+    var on = document.querySelectorAll('#track-sources input:checked');
+    var ids = Array.prototype.slice.call(on).map(function(i) { return i.value; });
+    if (ids.length === 0) {
+      document.getElementById('track-grid').innerHTML = '';
+      document.getElementById('track-totals').innerHTML = '';
+      document.getElementById('track-status').textContent = 'No sources selected.';
+      return;
+    }
+    loadTracking(ids);
+  }
+
+  function loadTracking(ids) {
+    currentEntityIds = ids;
     document.getElementById('track-status').textContent = 'loading…';
     google.script.run.withSuccessHandler(renderTracking)
-      .withFailureHandler(trackError).apiGetTracking(id, currentMeasure);
+      .withFailureHandler(trackError).apiGetTracking(ids, currentMeasure);
   }
 
   function trackError(e) {
@@ -305,7 +380,7 @@
     document.querySelectorAll('.measure').forEach(function (x) {
       x.classList.toggle('active', x.dataset.measure === measure);
     });
-    var meta = (t.type === 'project' ? 'project' : (t.status + ' · ' + t.project));
+    var meta = (t.type === 'project' ? 'project' : (t.type === 'composite' ? t.label : (t.status + ' · ' + t.project)));
     document.getElementById('track-status').textContent =
       meta + ' · ' + measure + ' · current ' + t.currentQuarter;
 
@@ -377,15 +452,16 @@
     var raw = inp.value.trim();
     var val = raw === '' ? null : Number(raw);
     document.getElementById('track-status').textContent = 'saving…';
+    // We pass the specific source from the input's data-source attribute.
     google.script.run.withSuccessHandler(renderTracking).withFailureHandler(trackError)
-      .apiSaveForecast(currentEntityId, inp.dataset.source, inp.dataset.mile,
+      .apiSaveForecast(currentEntityIds, inp.dataset.source, inp.dataset.mile,
         inp.dataset.item, inp.dataset.q, currentMeasure, val);
   }
 
   function saveComment(inp) {
     document.getElementById('track-status').textContent = 'saving…';
     google.script.run.withSuccessHandler(renderTracking).withFailureHandler(trackError)
-      .apiSaveComment(currentEntityId, inp.dataset.source, inp.dataset.mile,
+      .apiSaveComment(currentEntityIds, inp.dataset.source, inp.dataset.mile,
         inp.dataset.item, inp.value, currentMeasure);
   }
 

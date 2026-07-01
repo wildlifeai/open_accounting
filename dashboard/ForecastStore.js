@@ -18,6 +18,12 @@ function getForecastSheet_() {
     sheet = ss.insertSheet(CONFIG.FORECAST.TAB);
     sheet.appendRow(CONFIG.FORECAST.HEADER);
     sheet.setFrozenRows(1);
+  } else {
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (headers[5] !== 'Forecast Income') {
+      sheet.insertColumnsBefore(6, 2);
+      sheet.getRange(1, 1, 1, CONFIG.FORECAST.HEADER.length).setValues([CONFIG.FORECAST.HEADER]);
+    }
   }
   return sheet;
 }
@@ -92,14 +98,15 @@ function numOrNull_(v) {
   return isNaN(n) ? null : n;
 }
 
-/** Find the 1-based sheet row for a (source, item, quarter) match, or -1. */
-function findForecastRow_(data, source, item, quarter) {
+/** Find all 1-based sheet rows for a (source, item, quarter) match. */
+function findForecastRows_(data, source, item, quarter) {
+  const rows = [];
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === source &&
         String(data[i][2]).trim() === item &&
-        String(data[i][3]).trim() === quarter) return i + 1;
+        String(data[i][3]).trim() === quarter) rows.push(i + 1);
   }
-  return -1;
+  return rows;
 }
 
 /**
@@ -111,7 +118,9 @@ function upsertForecast(source, milestone, item, quarter, measure, value, user) 
   const sheet = getForecastSheet_();
   const data = sheet.getDataRange().getValues();
   user = user || (Session.getActiveUser().getEmail() || 'unknown');
-  const rowIndex = findForecastRow_(data, source, item, quarter);
+  
+  const rowIndices = findForecastRows_(data, source, item, quarter);
+  const rowIndex = rowIndices.length > 0 ? rowIndices[0] : -1;
   const existing = rowIndex !== -1 ? data[rowIndex - 1] : null;
 
   let cost = existing ? numOrNull_(existing[FC_COST]) : null;
@@ -119,6 +128,10 @@ function upsertForecast(source, milestone, item, quarter, measure, value, user) 
   const cleared = (value === null || value === '' || typeof value === 'undefined');
   const num = cleared ? null : (Number(value) || 0);
   if (measure === 'income') income = num; else cost = num;
+
+  for (let i = rowIndices.length - 1; i > 0; i--) {
+    sheet.deleteRow(rowIndices[i]);
+  }
 
   if (cost === null && income === null) { // nothing left -> revert to baseline
     if (rowIndex !== -1) sheet.deleteRow(rowIndex);
@@ -139,7 +152,13 @@ function upsertForecastComment(source, milestone, item, comment, user) {
   const sheet = getForecastSheet_();
   const data = sheet.getDataRange().getValues();
   user = user || (Session.getActiveUser().getEmail() || 'unknown');
-  const rowIndex = findForecastRow_(data, source, item, ''); // blank quarter = comment row
+  
+  const rowIndices = findForecastRows_(data, source, item, ''); // blank quarter = comment row
+  const rowIndex = rowIndices.length > 0 ? rowIndices[0] : -1;
+
+  for (let i = rowIndices.length - 1; i > 0; i--) {
+    sheet.deleteRow(rowIndices[i]);
+  }
 
   const text = String(comment == null ? '' : comment).trim();
   if (!text) {

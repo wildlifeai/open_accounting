@@ -72,46 +72,63 @@ function apiListSources() {
 
 /**
  * Client API: the quarterly tracking grid for one entity id (a funding source
- * name, or 'project:<Name>'), with the live forecast layered on.
+ * name, or 'project:<Name>'), with the live forecast layered on. Or an array of ids.
  */
-function apiGetTracking(id, measure) {
+function apiGetTracking(ids, measure) {
   const snap = getSnapshot();
   const currentQi = quarterSortNum(snap.currentQuarter || currentQuarterLabel());
-  return composeTracking(resolveEntity_(snap, id), getForecastMap(), currentQi, measure);
+  return composeTracking(resolveEntity_(snap, ids), getForecastMap(), currentQi, measure);
 }
 
 /** Build the entity (source or aggregated project) the tracking grid renders. */
-function resolveEntity_(snap, id) {
+function resolveEntity_(snap, ids) {
+  if (!Array.isArray(ids)) ids = [ids];
   const tracking = snap.tracking || [];
-  if (id.indexOf('project:') === 0) {
-    const projectName = id.substring('project:'.length);
+  
+  if (ids.length === 1 && ids[0].indexOf('project:') === 0) {
+    const projectName = ids[0].substring('project:'.length);
     const milestones = [];
     tracking.forEach(t => (t.milestones || []).forEach(m => {
       if (m.project === projectName) milestones.push(m);
     }));
     if (!milestones.length) throw new Error('No milestones for project: ' + projectName);
-    return { id: id, label: projectName + ' (project)', type: 'project',
+    return { id: ids[0], label: projectName + ' (project)', type: 'project',
       project: projectName, milestones: milestones };
   }
-  const src = tracking.filter(t => t.source === id)[0];
-  if (!src) throw new Error('Unknown funding source: ' + id);
-  return { id: id, label: id, type: 'source', source: id, status: src.status,
-    project: src.project, milestones: src.milestones };
+  
+  if (ids.length === 1) {
+    const src = tracking.filter(t => t.source === ids[0])[0];
+    if (!src) throw new Error('Unknown funding source: ' + ids[0]);
+    return { id: ids[0], label: ids[0], type: 'source', source: ids[0], status: src.status,
+      project: src.project, milestones: src.milestones };
+  }
+  
+  // Multiple sources selected
+  const milestones = [];
+  ids.forEach(id => {
+    const src = tracking.filter(t => t.source === id)[0];
+    if (src && src.milestones) {
+      milestones.push(...src.milestones);
+    }
+  });
+  
+  return { id: ids.join(','), label: 'Multiple sources selected', type: 'composite',
+    project: 'Multiple', milestones: milestones };
 }
 
 /**
  * Client API: save one forecast amount cell for a measure ('cost' | 'income').
  * A null value clears that measure. Returns the recomposed grid (same measure).
  */
-function apiSaveForecast(entityId, source, milestone, item, quarter, measure, value) {
+function apiSaveForecast(entityIds, source, milestone, item, quarter, measure, value) {
   upsertForecast(source, milestone, item, quarter, measure, value);
-  return apiGetTracking(entityId, measure);
+  return apiGetTracking(entityIds, measure);
 }
 
 /** Client API: save a milestone's forecast Comment. Returns the recomposed grid. */
-function apiSaveComment(entityId, source, milestone, item, comment, measure) {
+function apiSaveComment(entityIds, source, milestone, item, comment, measure) {
   upsertForecastComment(source, milestone, item, comment);
-  return apiGetTracking(entityId, measure);
+  return apiGetTracking(entityIds, measure);
 }
 
 // ---- Admin menu (only appears when bound to a spreadsheet) -----------------

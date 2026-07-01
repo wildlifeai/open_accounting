@@ -16,6 +16,9 @@
  */
 
 function buildSnapshot() {
+  const now = new Date();
+  const fy = fyBounds_(now);
+
   const budgets = readAllBudgets();
   const actualSince = earliestBudgetStart_(budgets);
   const actualLines = isXeroConnected() ? fetchXeroActuals(actualSince) : [];
@@ -25,12 +28,14 @@ function buildSnapshot() {
   const dataFlags = [];
   const budgetByProjSrc = {}; // 'project||source' -> { budget, income, status }
   const actualByProjSrc = {}; // 'project||source' -> actual expense
+  const actualByProjSrcFY = {}; // 'project||source' -> FY actual expense
   const sourceStatus = {};    // source name -> 'secured' | 'proposed'
 
   function project_(name) {
     if (!projects[name]) {
       projects[name] = { name: name, proposedBudget: 0, securedIncome: 0,
-        proposedIncome: 0, actualExpense: 0 };
+        proposedIncome: 0, actualExpense: 0,
+        proposedBudgetFY: 0, securedIncomeFY: 0, proposedIncomeFY: 0, actualExpenseFY: 0 };
     }
     return projects[name];
   }
@@ -42,19 +47,41 @@ function buildSnapshot() {
     const fc = computeFundingSourceForecast(src.lines);
     const shares = projectExpenseShares_(src.lines); // {project: 0..1}
 
+    const projDates = {};
+    src.lines.forEach(l => {
+      const p = l.project || CONFIG.DEFAULT_PROJECT;
+      if (!projDates[p]) projDates[p] = { start: null, end: null };
+      if (l.start && (!projDates[p].start || l.start < projDates[p].start)) projDates[p].start = l.start;
+      if (l.end && (!projDates[p].end || l.end > projDates[p].end)) projDates[p].end = l.end;
+    });
+
+    const expenseFY = sumMonthsInFY_(fc.expenseByMonth, fy);
+    const incomeFY = sumMonthsInFY_(fc.incomeByMonth, fy);
+
     Object.keys(shares).forEach(pName => {
       const share = shares[pName];
       const p = project_(pName);
       const expTotal = fc.totalBudgetExpense * share;
       const incTotal = fc.totalBudgetIncome * share;
+      const expFY = expenseFY * share;
+      const incFY = incomeFY * share;
 
       // Proposed budget = secured + proposed; secured income only on secured sources.
       p.proposedBudget += expTotal;
       p.proposedIncome += incTotal;
-      if (src.status === 'secured') p.securedIncome += incTotal;
+      p.proposedBudgetFY += expFY;
+      p.proposedIncomeFY += incFY;
+      if (src.status === 'secured') {
+        p.securedIncome += incTotal;
+        p.securedIncomeFY += incFY;
+      }
+
+      const dStart = projDates[pName] ? projDates[pName].start : null;
+      const dEnd = projDates[pName] ? projDates[pName].end : null;
 
       budgetByProjSrc[pName + '||' + src.name] =
-        { budget: expTotal, income: incTotal, status: src.status };
+        { budget: expTotal, income: incTotal, status: src.status,
+          budgetFY: expFY, incomeFY: incFY, start: isoOrNull_(dStart), end: isoOrNull_(dEnd) };
     });
 
     sourceStatus[src.name] = src.status;
@@ -67,14 +94,20 @@ function buildSnapshot() {
   actualLines.forEach(l => {
     if (l.kind !== 'expense') return;
     if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
-    project_(l.project).actualExpense += l.amount;
+    const p = project_(l.project);
+    p.actualExpense += l.amount;
+    
+    const isFY = (new Date(l.date) >= fy.start && new Date(l.date) <= fy.end);
+    if (isFY) p.actualExpenseFY += l.amount;
+
     const fs = l.fundingSource && !startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)
       ? l.fundingSource : '(unassigned)';
     const akey = l.project + '||' + fs;
     actualByProjSrc[akey] = (actualByProjSrc[akey] || 0) + l.amount;
+    if (isFY) actualByProjSrcFY[akey] = (actualByProjSrcFY[akey] || 0) + l.amount;
   });
 
-  const breakdownRows = buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, sourceStatus);
+  const breakdownRows = buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, actualByProjSrcFY, sourceStatus);
 
   // Quarterly tracking grid (baseline + actual per funding source / milestone /
   // quarter). Forecast is layered on at view time from the live Forecast sheet,
@@ -89,12 +122,15 @@ function buildSnapshot() {
       proposedBudget: round_(p.proposedBudget),
       securedIncome: round_(p.securedIncome),
       actualExpense: round_(p.actualExpense),
-      unsecuredGap: round_(Math.max(0, p.proposedBudget - p.securedIncome))
+      unsecuredGap: round_(Math.max(0, p.proposedBudget - p.securedIncome)),
+      proposedBudgetFY: round_(p.proposedBudgetFY),
+      securedIncomeFY: round_(p.securedIncomeFY),
+      actualExpenseFY: round_(p.actualExpenseFY),
+      unsecuredGapFY: round_(Math.max(0, p.proposedBudgetFY - p.securedIncomeFY))
     };
   });
 
-  const now = new Date();
-  const fy = fyBounds_(now);
+  // fy and now are already defined at the top
   const coverage = {
     today: now.toISOString(),
     fyLabel: fy.label,
@@ -125,7 +161,7 @@ function buildSnapshot() {
  * source / status. Built from the union of budget and actual keys so spend that
  * has no matching budget line still shows up.
  */
-function buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, sourceStatus) {
+function buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, actualByProjSrcFY, sourceStatus) {
   const keys = {};
   Object.keys(budgetByProjSrc).forEach(k => (keys[k] = true));
   Object.keys(actualByProjSrc).forEach(k => (keys[k] = true));
@@ -134,7 +170,7 @@ function buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, sourceStatus) {
     const parts = key.split('||');
     const project = parts[0];
     const source = parts[1];
-    const b = budgetByProjSrc[key] || { budget: 0, income: 0 };
+    const b = budgetByProjSrc[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0, start: null, end: null };
     const status = (b.status || sourceStatus[source] || 'unknown');
     return {
       project: project,
@@ -142,7 +178,12 @@ function buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, sourceStatus) {
       status: status,
       budget: round_(b.budget || 0),
       secured: round_(status === 'secured' ? (b.income || 0) : 0),
-      actual: round_(actualByProjSrc[key] || 0)
+      actual: round_(actualByProjSrc[key] || 0),
+      budgetFY: round_(b.budgetFY || 0),
+      securedFY: round_(status === 'secured' ? (b.incomeFY || 0) : 0),
+      actualFY: round_(actualByProjSrcFY[key] || 0),
+      start: b.start || null,
+      end: b.end || null
     };
   });
 }
@@ -286,11 +327,24 @@ function latestBudgetEnd_(budgets) {
 function isoOrNull_(d) { return d ? d.toISOString() : null; }
 
 function orgTotals_(rows) {
-  const t = { budget: 0, secured: 0, actual: 0, unsecuredGap: 0 };
+  const t = { budget: 0, secured: 0, actual: 0, unsecuredGap: 0,
+              budgetFY: 0, securedFY: 0, actualFY: 0, unsecuredGapFY: 0 };
   rows.forEach(r => {
     t.budget += r.proposedBudget; t.secured += r.securedIncome;
     t.actual += r.actualExpense; t.unsecuredGap += r.unsecuredGap;
+    t.budgetFY += r.proposedBudgetFY; t.securedFY += r.securedIncomeFY;
+    t.actualFY += r.actualExpenseFY; t.unsecuredGapFY += r.unsecuredGapFY;
   });
   Object.keys(t).forEach(k => (t[k] = round_(t[k])));
   return t;
+}
+
+function sumMonthsInFY_(monthMap, fy) {
+  let sum = 0;
+  Object.keys(monthMap).forEach(k => {
+    const p = k.split('-');
+    const d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, 1);
+    if (d >= fy.start && d <= fy.end) sum += monthMap[k];
+  });
+  return sum;
 }

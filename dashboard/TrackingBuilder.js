@@ -49,7 +49,17 @@ function composeTracking(entity, forecastMap, currentQi, measure) {
       const q = col.label;
       const baseline = L.base[q] || 0;
       const actual = L.act[q] || 0;
-      const override = L.editable ? L.ov(amounts[m.source + '||' + m.item + '||' + q]) : null;
+      const amt = amounts[m.source + '||' + m.item + '||' + q];
+      let override = null;
+      if (measure === 'net') {
+        if (amt && (amt.income !== null || amt.cost !== null)) {
+          const inc = amt.income !== null ? amt.income : (m.incomeBaseline && m.incomeBaseline[q] || 0);
+          const cost = amt.cost !== null ? amt.cost : (m.baseline && m.baseline[q] || 0);
+          override = inc - cost;
+        }
+      } else {
+        override = L.editable ? L.ov(amt) : null;
+      }
       const forecast = override !== null ? override : baseline;
       const effective = col.past ? actual : forecast;
       return { type: 'quarter', baseline: Math.round(baseline), actual: Math.round(actual),
