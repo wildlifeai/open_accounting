@@ -36,30 +36,34 @@ function runTests() {
   check('Spyfish share ~0.722', Math.abs(shares['Spyfish Aotearoa'] - (19600 / 27160)) < 0.001);
   check('General share ~0.278', Math.abs(shares['General'] - (7560 / 27160)) < 0.001);
 
-  // Quarterly helpers.
-  check('quarterOfMonthKey 2026-05 -> 2026 Q2', quarterOfMonthKey_('2026-05') === '2026 Q2');
+  // Financial-year quarter helpers (FY starts April).
+  check('May 2026 -> 26/27 Q1', quarterOfMonthKey_('2026-05') === '26/27 Q1');
+  check('Jan 2026 -> 25/26 Q4', quarterOfMonthKey_('2026-01') === '25/26 Q4');
   check('itemCode strips name', itemCode_('WW_25_TOI_002 - General management') === 'WW_25_TOI_002');
-  var q = bucketToQuarters({ '2026-01': 100, '2026-02': 50, '2026-04': 30 });
-  check('bucketToQuarters sums Q1', q['2026 Q1'] === 150);
-  check('bucketToQuarters Q2', q['2026 Q2'] === 30);
-  check('quarterSortNum order', quarterSortNum('2026 Q2') > quarterSortNum('2025 Q4'));
+  var qb = bucketToQuarters({ '2026-01': 100, '2026-02': 50, '2026-04': 30 });
+  check('bucketToQuarters sums FY Q4', qb['25/26 Q4'] === 150);
+  check('bucketToQuarters next FY Q1', qb['26/27 Q1'] === 30);
+  check('quarterSortNum order', quarterSortNum('26/27 Q1') > quarterSortNum('25/26 Q4'));
 
-  // Forecast merge: past quarter -> actual, current/future -> override or baseline.
-  var tsrc = {
-    source: 'WW_25_TOI', status: 'secured', project: 'Wildlife Watcher',
-    quarters: ['2025 Q4', '2026 Q1', '2026 Q2', '2026 Q3'],
-    milestones: [{ item: 'WW_25_TOI_002', milestone: 'General management',
-      baseline: { '2025 Q4': 4992, '2026 Q1': 7615, '2026 Q2': 7703, '2026 Q3': 2792 },
-      actual: { '2025 Q4': 2000, '2026 Q1': 2500 } }]
+  // Forecast merge with FY columns: aggregate 'Up to last FY' + this FY quarters.
+  var entity = {
+    id: 'WW_25_TOI', label: 'WW_25_TOI', type: 'source', source: 'WW_25_TOI',
+    status: 'secured', project: 'Wildlife Watcher',
+    milestones: [{ item: 'WW_25_TOI_002', milestone: 'General management', source: 'WW_25_TOI',
+      baseline: { '25/26 Q3': 4992, '25/26 Q4': 7615, '26/27 Q1': 7703, '26/27 Q2': 2792 },
+      actual: { '25/26 Q3': 2000, '25/26 Q4': 2500 } }]
   };
-  var fmap = { 'WW_25_TOI||WW_25_TOI_002||2026 Q2': { cost: 5000 } };
-  var grid = composeTrackingForSource(tsrc, fmap, '2026 Q2');
+  var fmap = { amounts: { 'WW_25_TOI||WW_25_TOI_002||26/27 Q1': { cost: 5000 } },
+    comments: { 'WW_25_TOI||WW_25_TOI_002': 'staffing ramp' } };
+  var grid = composeTracking(entity, fmap, quarterSortNum('26/27 Q1'));
   var m = grid.milestones[0];
-  check('past quarter uses actual', m.cells[0].effective === 2000);
-  check('current quarter uses override', m.cells[2].effective === 5000 && m.cells[2].hasOverride);
-  check('future quarter uses baseline', m.cells[3].effective === 2792);
-  check('expected = 2000+2500+5000+2792', m.expectedTotal === 12292);
-  check('actual to date = 4500', m.actualToDate === 4500);
+  check('first column is aggregate', grid.columns[0].type === 'aggregate');
+  check('aggregate sums prior FY actual', m.cells[0].effective === 4500);
+  check('current quarter uses override', m.cells[1].effective === 5000 && m.cells[1].hasOverride);
+  check('future quarter uses baseline', m.cells[2].effective === 2792);
+  check('expected = 4500+5000+2792', m.expectedTotal === 12292);
+  check('baseline total = 23102', m.baselineTotal === 23102);
+  check('comment carried through', m.comment === 'staffing ramp');
 
   Logger.log(results.join('\n'));
   return results;

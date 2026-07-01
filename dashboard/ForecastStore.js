@@ -54,57 +54,100 @@ function forecastKey_(source, item, quarter) {
   return source + '||' + item + '||' + quarter;
 }
 
+function commentKey_(source, item) { return source + '||' + item; }
+
+// Column indices (0-based) within a Forecast sheet row.
+const FC_COST = 4, FC_INCOME = 5, FC_COMMENT = 6, FC_USER = 7, FC_AT = 8;
+
 /**
- * @return { 'source||item||quarter': { cost, milestone } } for every stored row.
+ * @return {{ amounts: { 'source||item||quarter': { cost, income } },
+ *            comments: { 'source||item': comment } }}
+ * Amount rows have a Quarter; comment rows have a blank Quarter.
  */
 function getForecastMap() {
   const sheet = getForecastSheet_();
   const data = sheet.getDataRange().getValues();
-  const map = {};
+  const amounts = {};
+  const comments = {};
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const source = String(row[0] || '').trim();
-    const milestone = String(row[1] || '').trim();
     const item = String(row[2] || '').trim();
     const quarter = String(row[3] || '').trim();
-    if (!source || !quarter) continue;
-    map[forecastKey_(source, item, quarter)] = {
-      cost: Number(row[4]) || 0, milestone: milestone
-    };
+    const comment = String(row[FC_COMMENT] || '').trim();
+    if (!source) continue;
+    if (quarter) {
+      amounts[forecastKey_(source, item, quarter)] = {
+        cost: numOrNull_(row[FC_COST]), income: numOrNull_(row[FC_INCOME]) };
+    } else if (comment) {
+      comments[commentKey_(source, item)] = comment;
+    }
   }
-  return map;
+  return { amounts: amounts, comments: comments };
 }
 
-/**
- * Insert or update one forecast cell. Returns the saved value.
- * `cost` of null/'' clears the override (row removed) so the cell reverts to
- * baseline.
- */
-function upsertForecast(source, milestone, item, quarter, cost, user) {
-  const sheet = getForecastSheet_();
-  const data = sheet.getDataRange().getValues();
-  const now = new Date();
-  user = user || (Session.getActiveUser().getEmail() || 'unknown');
+function numOrNull_(v) {
+  if (v === '' || v === null || typeof v === 'undefined') return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
 
-  let rowIndex = -1;
+/** Find the 1-based sheet row for a (source, item, quarter) match, or -1. */
+function findForecastRow_(data, source, item, quarter) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === source &&
         String(data[i][2]).trim() === item &&
-        String(data[i][3]).trim() === quarter) { rowIndex = i + 1; break; }
+        String(data[i][3]).trim() === quarter) return i + 1;
   }
+  return -1;
+}
 
-  const clearing = (cost === null || cost === '' || typeof cost === 'undefined');
-  if (clearing) {
+/**
+ * Insert or update one forecast amount cell for a given measure ('cost' or
+ * 'income'). A null/'' value clears that measure; the row is removed only when
+ * both cost and income are then empty so the cell reverts to baseline.
+ */
+function upsertForecast(source, milestone, item, quarter, measure, value, user) {
+  const sheet = getForecastSheet_();
+  const data = sheet.getDataRange().getValues();
+  user = user || (Session.getActiveUser().getEmail() || 'unknown');
+  const rowIndex = findForecastRow_(data, source, item, quarter);
+  const existing = rowIndex !== -1 ? data[rowIndex - 1] : null;
+
+  let cost = existing ? numOrNull_(existing[FC_COST]) : null;
+  let income = existing ? numOrNull_(existing[FC_INCOME]) : null;
+  const cleared = (value === null || value === '' || typeof value === 'undefined');
+  const num = cleared ? null : (Number(value) || 0);
+  if (measure === 'income') income = num; else cost = num;
+
+  if (cost === null && income === null) { // nothing left -> revert to baseline
     if (rowIndex !== -1) sheet.deleteRow(rowIndex);
-    return { source, item, quarter, cost: null };
+    return { source, item, quarter, cost: null, income: null };
   }
+  const rowValues = [source, milestone, item, quarter,
+    cost === null ? '' : cost, income === null ? '' : income, '', user, new Date()];
+  if (rowIndex === -1) sheet.appendRow(rowValues);
+  else sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+  return { source, item, quarter, cost: cost, income: income };
+}
 
-  const value = Number(cost) || 0;
-  const rowValues = [source, milestone, item, quarter, value, user, now];
-  if (rowIndex === -1) {
-    sheet.appendRow(rowValues);
-  } else {
-    sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+/**
+ * Insert/update a milestone's Comment (stored on a row with a blank Quarter).
+ * An empty comment clears the row.
+ */
+function upsertForecastComment(source, milestone, item, comment, user) {
+  const sheet = getForecastSheet_();
+  const data = sheet.getDataRange().getValues();
+  user = user || (Session.getActiveUser().getEmail() || 'unknown');
+  const rowIndex = findForecastRow_(data, source, item, ''); // blank quarter = comment row
+
+  const text = String(comment == null ? '' : comment).trim();
+  if (!text) {
+    if (rowIndex !== -1) sheet.deleteRow(rowIndex);
+    return { source, item, comment: '' };
   }
-  return { source, item, quarter, cost: value };
+  const rowValues = [source, milestone, item, '', '', '', text, user, new Date()];
+  if (rowIndex === -1) sheet.appendRow(rowValues);
+  else sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+  return { source, item, comment: text };
 }

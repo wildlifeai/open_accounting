@@ -74,16 +74,45 @@ The **Quarterly tracking** tab is your replacement for the old "Budget, Actual, 
 Tracking" sheet - but you no longer keep one per funding source, and you no longer sync Xero
 into each sheet by hand.
 
-Pick a funding source from the dropdown. You get a grid: **milestones down the side,
-quarters across the top**. Each cell has three layers:
+Pick something to track from the dropdown. It lists:
+- **General (project)** - the whole General project, aggregating its milestones across every
+  funding source, with a rolling **1.5-year** forecast horizon (the elapsed quarters of this
+  financial year plus six quarters ahead).
+- each **funding source** - shown as **"Up to last FY"** (one column lumping everything before
+  this financial year), then this financial year's quarters, then next year's quarters if the
+  funding runs that long.
 
-- **Baseline** (shown small under each cell) - the original budget from the funding source's
-  `Budget` tab. It's frozen, so you can always see how far you've drifted from the plan.
-- **Actual** - for quarters that have already passed, the cell shows real spend from Xero.
-  You can't edit these - they're facts.
-- **Forecast** - for the current quarter and future quarters, the cell is an **editable
-  box**. It starts at the budget baseline. Type a new number if you now expect to spend more
-  or less; the box highlights to show it's an override. Clear the box to snap back to budget.
+Quarters follow our **financial year (April-March)**: Q1 = Apr-Jun, Q2 = Jul-Sep, Q3 =
+Oct-Dec, Q4 = Jan-Mar, labelled like `25/26 Q1`.
+
+Use the **Cost / Income / Net** toggle to switch what the grid shows:
+- **Cost** - what you spend on each milestone.
+- **Income** - what you've *received* for each milestone (from Xero), against the budgeted
+  income.
+- **Net** - income minus cost, i.e. whether each milestone is paying for itself. Net is
+  derived, so it's read-only.
+
+You get a grid: **milestones down the side, quarters across the top**. Each cell has three
+layers:
+
+- **Baseline** (shown small under each cell) - the original budget from the `Budget` tab.
+  It's frozen, so you can always see how far you've drifted from the plan.
+- **Actual** - for quarters that have already passed (and the "Up to last FY" column), the
+  cell shows real spend from Xero. You can't edit these - they're facts.
+- **Forecast** - for the current quarter and future quarters, the cell is an **editable box**.
+  It starts at the budget baseline. Type a new number if you now expect to spend more or less;
+  the box highlights to show it's an override. Clear the box to snap back to budget.
+
+- **Comment** - the last column on each milestone row is a free-text box to record **why**
+  you're forecasting what you are (e.g. "contractor starts Q3", "grant extension pending").
+  One comment per milestone; it saves with the forecast.
+
+**Nothing from Xero is dropped.** If money is coded to a product/service that isn't a budget
+milestone (e.g. income booked to a "Cash received" item), it appears as its own
+**"… (unbudgeted)"** row. Anything with no product/service at all (and no code in its
+description) lands in an **"Unassigned"** row. This keeps the **Total** line reconciled to
+Xero - so total income received and total spend always match the funder report - even when
+coding doesn't line up perfectly with the budget.
 
 Your edits save immediately to a shared Forecast sheet, and the totals on the right recompute:
 

@@ -62,13 +62,32 @@
   .flags { margin-top: 18px; font-size: 12px; color: var(--amber-text); }
   .flags div { margin-bottom: 4px; }
 
+  .coverage { font-size: 13px; color: var(--muted); margin: 0 0 16px; display: flex;
+    flex-wrap: wrap; gap: 8px 18px; }
+  .coverage b { font-weight: 500; color: var(--text); }
+  .coverage .sep { color: var(--hint); }
+
   .breakdown-head { display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 12px; margin: 26px 0 10px; }
   .breakdown-head h2 { margin: 0; }
+  .bd-controls-wrap { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
   .bd-controls { display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--text); }
   .bd-controls .bd-label { color: var(--muted); }
   .bd-controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
   .bd-controls input { margin: 0; }
+  .bd-dd { position: relative; }
+  .bd-dd > summary { list-style: none; cursor: pointer; border: 1px solid var(--line);
+    border-radius: 8px; padding: 4px 10px; background: var(--bg); color: var(--text); }
+  .bd-dd > summary::-webkit-details-marker { display: none; }
+  .bd-dd > summary::after { content: " \25BE"; color: var(--hint); }
+  .bd-dd[open] > summary { border-color: var(--green); }
+  .bd-dd-panel { position: absolute; right: 0; z-index: 10; margin-top: 4px; min-width: 200px;
+    max-height: 280px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+  .bd-dd-actions { display: flex; gap: 12px; margin-bottom: 6px; font-size: 12px; }
+  .bd-dd-actions a { color: var(--green); cursor: pointer; }
+  .bd-dd-list label { display: flex; align-items: center; gap: 6px; padding: 3px 0;
+    font-size: 13px; white-space: nowrap; }
 
   .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin: 4px 0 20px; }
   .tab { border: none; border-bottom: 2px solid transparent; border-radius: 0;
@@ -78,6 +97,12 @@
 
   .track-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
   .track-head label { font-size: 13px; color: var(--muted); }
+  .measure-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .measure-toggle .measure { border: none; border-radius: 0; padding: 6px 12px; font-size: 13px;
+    background: var(--bg); color: var(--muted); border-left: 1px solid var(--line); }
+  .measure-toggle .measure:first-child { border-left: none; }
+  .measure-toggle .measure.active { background: var(--green); color: #fff; }
+  .measure-toggle .measure:hover:not(.active) { background: var(--bg2); }
   select { font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line);
     border-radius: 8px; background: var(--bg); color: var(--text); }
   .track-status { font-size: 12px; color: var(--hint); }
@@ -98,6 +123,11 @@
     border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
   input.fc.override { border-color: var(--green); }
   input.fc:focus { outline: 2px solid var(--green); outline-offset: -1px; }
+  #track-grid th.agg, #track-grid td.agg { background: rgba(0,0,0,.03); }
+  #track-grid th.cmt-h, #track-grid td.cmt-c { text-align: left; min-width: 180px; }
+  input.cmt { font: inherit; font-size: 12px; width: 100%; min-width: 160px; padding: 4px 6px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+  input.cmt:focus { outline: 2px solid var(--green); outline-offset: -1px; }
   .var-pos { color: var(--red); }
   .var-neg { color: var(--green); }
   td.tot, th.tot { font-weight: 500; border-left: 1px solid var(--line); }

@@ -181,17 +181,7 @@ function fetchBankTransactionLines_(modifiedAfter) {
   return paginate_('/BankTransactions', 'BankTransactions', (tx, out) => {
     const date = parseXeroDate_(tx.DateString ? null : tx.Date) || new Date(tx.DateString);
     const kind = tx.Type === 'RECEIVE' ? 'income' : 'expense';
-    (tx.LineItems || []).forEach(li => {
-      out.push({
-        date: date,
-        account: accountLabelFromCode_(li.AccountCode),
-        project: trackingValue_(li.Tracking, CONFIG.XERO.PROJECT_TRACKING_CATEGORY),
-        fundingSource: trackingValue_(li.Tracking, CONFIG.XERO.FUNDING_TRACKING_CATEGORY),
-        item: li.Item ? li.Item.Code : '',
-        amount: Math.abs(Number(li.LineAmount) || 0),
-        kind: kind
-      });
-    });
+    (tx.LineItems || []).forEach(li => out.push(normaliseLine_(li, date, kind)));
   }, modifiedAfter);
 }
 
@@ -200,18 +190,32 @@ function fetchInvoiceLines_(modifiedAfter) {
     if (inv.Status === 'DELETED' || inv.Status === 'VOIDED') return;
     const date = new Date(inv.DateString || parseXeroDate_(inv.Date));
     const kind = inv.Type === 'ACCREC' ? 'income' : 'expense';
-    (inv.LineItems || []).forEach(li => {
-      out.push({
-        date: date,
-        account: accountLabelFromCode_(li.AccountCode),
-        project: trackingValue_(li.Tracking, CONFIG.XERO.PROJECT_TRACKING_CATEGORY),
-        fundingSource: trackingValue_(li.Tracking, CONFIG.XERO.FUNDING_TRACKING_CATEGORY),
-        item: li.Item ? li.Item.Code : '',
-        amount: Math.abs(Number(li.LineAmount) || 0),
-        kind: kind
-      });
-    });
+    (inv.LineItems || []).forEach(li => out.push(normaliseLine_(li, date, kind)));
   }, modifiedAfter);
+}
+
+/** Normalise a Xero line item into the app's actual-line shape. */
+function normaliseLine_(li, date, kind) {
+  // Prefer the product/service code; if absent, recover a {SOURCE}_{NNN} code
+  // from the line description (some lines, e.g. bank fees, carry the code only
+  // in the description). This keeps such amounts attached to their milestone.
+  const code = li.Item ? li.Item.Code : codeFromDescription_(li.Description);
+  return {
+    date: date,
+    account: accountLabelFromCode_(li.AccountCode),
+    project: trackingValue_(li.Tracking, CONFIG.XERO.PROJECT_TRACKING_CATEGORY),
+    fundingSource: trackingValue_(li.Tracking, CONFIG.XERO.FUNDING_TRACKING_CATEGORY),
+    item: code,
+    itemName: li.Item ? (li.Item.Name || '') : '',
+    amount: Math.abs(Number(li.LineAmount) || 0),
+    kind: kind
+  };
+}
+
+/** Extract a leading {SOURCE}_{NNN}-style code from a description, or ''. */
+function codeFromDescription_(desc) {
+  const c = String(desc == null ? '' : desc).split(' - ')[0].trim();
+  return /^[A-Za-z0-9]+_\d{2}_[A-Za-z0-9]+_\d{3}$/.test(c) ? c : '';
 }
 
 /**

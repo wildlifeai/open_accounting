@@ -93,10 +93,22 @@ function buildSnapshot() {
     };
   });
 
+  const now = new Date();
+  const fy = fyBounds_(now);
+  const coverage = {
+    today: now.toISOString(),
+    fyLabel: fy.label,
+    fyStart: fy.start.toISOString(),
+    fyEnd: fy.end.toISOString(),
+    forecastStart: isoOrNull_(earliestBudgetStart_(budgets)),
+    forecastEnd: isoOrNull_(latestBudgetEnd_(budgets))
+  };
+
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: now.toISOString(),
     xeroConnected: isXeroConnected(),
     currentQuarter: currentQuarterLabel(),
+    coverage: coverage,
     totals: orgTotals_(rows),
     projects: rows,
     fundingSources: fundingSources,
@@ -141,15 +153,20 @@ function buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, sourceStatus) {
  * quarterly tracking screen; the live forecast layer is merged in WebApp/UI.
  */
 function buildTracking_(budgets, actualLines) {
-  // Index actuals: source||itemCode -> { quarter: amount }
-  const actualBySourceItem = {};
+  // Index Xero actuals by source||itemCode -> { quarter: amount }, split by
+  // expense (cost) vs income. Also remember a display name per item code.
+  const costActuals = {};
+  const incomeActuals = {};
+  const actualNames = {}; // source||code -> Xero item name
   actualLines.forEach(l => {
-    if (l.kind !== 'expense' || !l.fundingSource) return;
-    if (startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)) return;
+    if (!l.fundingSource || startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)) return;
     const q = quarterOfMonthKey_(DateMath.monthKey(new Date(l.date)));
-    const key = l.fundingSource + '||' + itemCode_(l.item);
-    (actualBySourceItem[key] = actualBySourceItem[key] || {});
-    actualBySourceItem[key][q] = (actualBySourceItem[key][q] || 0) + l.amount;
+    const code = itemCode_(l.item);
+    const key = l.fundingSource + '||' + code;
+    const bucket = l.kind === 'income' ? incomeActuals : costActuals;
+    (bucket[key] = bucket[key] || {});
+    bucket[key][q] = (bucket[key][q] || 0) + l.amount;
+    if (code && l.itemName && !actualNames[key]) actualNames[key] = l.itemName;
   });
 
   return budgets.map(src => {
@@ -161,19 +178,58 @@ function buildTracking_(budgets, actualLines) {
       byItem[code].lines.push(l);
     });
 
-    const quarterSet = {};
     const milestones = Object.keys(byItem).map(code => {
-      const baseline = roundMap_(bucketToQuarters(distributeByMonth_(byItem[code].lines, 'cost')));
-      const actual = roundMap_(actualBySourceItem[src.name + '||' + code] || {});
-      Object.keys(baseline).forEach(q => (quarterSet[q] = true));
-      Object.keys(actual).forEach(q => (quarterSet[q] = true));
-      return { item: code, milestone: byItem[code].milestone, baseline: baseline, actual: actual };
+      const key = src.name + '||' + code;
+      return {
+        item: code, milestone: byItem[code].milestone, source: src.name,
+        project: dominantProject_(byItem[code].lines),
+        baseline: roundMap_(bucketToQuarters(distributeByMonth_(byItem[code].lines, 'cost'))),
+        actual: roundMap_(costActuals[key] || {}),
+        incomeBaseline: roundMap_(bucketToQuarters(distributeByMonth_(byItem[code].lines, 'income'))),
+        incomeActual: roundMap_(incomeActuals[key] || {})
+      };
     });
 
+    // Add a row for every actual item code NOT in the budget, so unbudgeted
+    // income (e.g. cash-received items) and miscoded expenses still show and the
+    // totals reconcile to Xero. Codeless actuals go to an "Unassigned" row.
+    const prefix = src.name + '||';
+    const seenCodes = {};
+    Object.keys(costActuals).concat(Object.keys(incomeActuals)).forEach(k => {
+      if (k.indexOf(prefix) === 0) seenCodes[k.substring(prefix.length)] = true;
+    });
+    Object.keys(seenCodes).forEach(code => {
+      if (byItem[code]) return; // already a budget milestone
+      const key = prefix + code;
+      const actual = roundMap_(costActuals[key] || {});
+      const incomeActual = roundMap_(incomeActuals[key] || {});
+      if (!Object.keys(actual).length && !Object.keys(incomeActual).length) return;
+      const blank = (code === '');
+      milestones.push({
+        item: blank ? '(unassigned)' : code,
+        milestone: blank ? 'Unassigned (no product/service)'
+          : (actualNames[key] || code) + ' (unbudgeted)',
+        source: src.name, project: src.projectFolder, actualOnly: true,
+        baseline: {}, actual: actual, incomeBaseline: {}, incomeActual: incomeActual
+      });
+    });
+
+    const quarterSet = {};
+    milestones.forEach(m => [m.baseline, m.actual, m.incomeBaseline, m.incomeActual]
+      .forEach(map => Object.keys(map).forEach(q => (quarterSet[q] = true))));
     const quarters = Object.keys(quarterSet).sort((a, b) => quarterSortNum(a) - quarterSortNum(b));
     return { source: src.name, status: src.status, project: src.projectFolder,
       quarters: quarters, milestones: milestones };
   });
+}
+
+/** The project carrying the most budgeted cost across a milestone's lines. */
+function dominantProject_(lines) {
+  const byProject = {};
+  lines.forEach(l => (byProject[l.project] = (byProject[l.project] || 0) + (l.cost || 0)));
+  let best = null, bestVal = -1;
+  Object.keys(byProject).forEach(p => { if (byProject[p] > bestVal) { bestVal = byProject[p]; best = p; } });
+  return best || (lines[0] && lines[0].project) || CONFIG.DEFAULT_PROJECT;
 }
 
 function roundMap_(map) {
@@ -218,6 +274,16 @@ function earliestBudgetStart_(budgets) {
   }));
   return min || new Date(new Date().getFullYear() - 1, 0, 1);
 }
+
+function latestBudgetEnd_(budgets) {
+  let max = null;
+  budgets.forEach(b => b.lines.forEach(l => {
+    if (l.end && (!max || l.end > max)) max = l.end;
+  }));
+  return max;
+}
+
+function isoOrNull_(d) { return d ? d.toISOString() : null; }
 
 function orgTotals_(rows) {
   const t = { budget: 0, secured: 0, actual: 0, unsecuredGap: 0 };

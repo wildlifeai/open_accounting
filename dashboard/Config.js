@@ -95,9 +95,18 @@ const CONFIG = {
     SPREADSHEET_ID: '',          // leave blank to auto-create
     FILE_NAME: 'Cockpit Forecast',
     TAB: 'Forecast',
+    // Amount rows have a Quarter plus a Forecast Cost and/or Forecast Income; a
+    // milestone Comment is stored on its own row (Quarter blank, Comment filled).
     HEADER: ['Funding Source', 'Milestone', 'Item', 'Quarter', 'Forecast Cost',
-             'Updated By', 'Updated At']
+             'Forecast Income', 'Comment', 'Updated By', 'Updated At']
   },
+
+  // ---- Financial year -----------------------------------------------------
+  // Quarters in the tracking screen follow this financial year. 4 = April start
+  // (Apr-Mar), so Q1 = Apr-Jun, Q2 = Jul-Sep, Q3 = Oct-Dec, Q4 = Jan-Mar.
+  FINANCIAL_YEAR_START_MONTH: 4,
+  // How far ahead the General project view forecasts (quarters past current).
+  GENERAL_FORECAST_QUARTERS: 6, // 1.5 years
 
   // ---- Caching ------------------------------------------------------------
   // The snapshot is stored as a JSON file in Drive (no size ceiling, unlike

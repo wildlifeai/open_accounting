@@ -25,15 +25,42 @@
     </nav>
 
     <div id="view-overview">
+      <div id="coverage" class="coverage"></div>
       <section class="cards" id="totals"></section>
 
       <div class="breakdown-head">
         <h2>Breakdown</h2>
-        <div class="bd-controls">
-          <span class="bd-label">group by:</span>
-          <label><input type="checkbox" class="bd-dim" value="project" checked> Project</label>
-          <label><input type="checkbox" class="bd-dim" value="fundingSource"> Funding source</label>
-          <label><input type="checkbox" class="bd-dim" value="status"> Status</label>
+        <div class="bd-controls-wrap">
+          <div class="bd-controls">
+            <span class="bd-label">group by:</span>
+            <label><input type="checkbox" class="bd-dim" value="project" checked> Project</label>
+            <label><input type="checkbox" class="bd-dim" value="fundingSource"> Funding source</label>
+            <label><input type="checkbox" class="bd-dim" value="status"> Status</label>
+          </div>
+          <div class="bd-controls">
+            <span class="bd-label">show:</span>
+            <label><input type="checkbox" class="bd-status" value="secured" checked> Secured (confirmed)</label>
+            <label><input type="checkbox" class="bd-status" value="proposed" checked> Proposed</label>
+          </div>
+          <div class="bd-controls">
+            <span class="bd-label">filter:</span>
+            <details class="bd-dd">
+              <summary id="filter-projects-sum">Projects</summary>
+              <div class="bd-dd-panel">
+                <div class="bd-dd-actions"><a data-target="filter-projects" data-act="all">all</a>
+                  <a data-target="filter-projects" data-act="none">none</a></div>
+                <div class="bd-dd-list" id="filter-projects"></div>
+              </div>
+            </details>
+            <details class="bd-dd">
+              <summary id="filter-sources-sum">Funding sources</summary>
+              <div class="bd-dd-panel">
+                <div class="bd-dd-actions"><a data-target="filter-sources" data-act="all">all</a>
+                  <a data-target="filter-sources" data-act="none">none</a></div>
+                <div class="bd-dd-list" id="filter-sources"></div>
+              </div>
+            </details>
+          </div>
         </div>
       </div>
       <div class="table-wrap">
@@ -54,15 +81,21 @@
 
     <div id="view-tracking" class="hidden">
       <div class="track-head">
-        <label for="source-select">Funding source</label>
+        <label for="source-select">Track</label>
         <select id="source-select"></select>
+        <div class="measure-toggle">
+          <button class="measure active" data-measure="cost">Cost</button>
+          <button class="measure" data-measure="income">Income</button>
+          <button class="measure" data-measure="net">Net</button>
+        </div>
         <span id="track-status" class="track-status"></span>
       </div>
       <p class="track-help">
-        Past quarters show <strong>actual</strong> spend from Xero. Current and future
-        quarters are your editable <strong>forecast</strong> — type a number to override the
-        budget baseline (shown underneath); clear it to revert. Variance compares your
-        expected total against the frozen budget.
+        Switch between <strong>Cost</strong>, <strong>Income</strong> (received) and
+        <strong>Net</strong> (income − cost). Past quarters show <strong>actual</strong> from
+        Xero; current and future quarters are your editable <strong>forecast</strong> — type a
+        number to override the baseline (shown underneath), clear it to revert. Net is derived,
+        so it isn't directly editable.
       </p>
       <div class="track-grid-wrap">
         <table id="track-grid"></table>

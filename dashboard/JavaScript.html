@@ -40,6 +40,8 @@
       card('Actual to date', fmtMoney(t.actual)) +
       card('Unsecured gap', fmtMoney(t.unsecuredGap), 'danger');
 
+    renderCoverage(s.coverage);
+    buildFilters();
     renderBreakdown();
 
     document.getElementById('flags').innerHTML =
@@ -53,10 +55,72 @@
       .map(function (c) { return c.value; });
   }
 
+  function selectedStatuses() {
+    return Array.prototype.slice.call(document.querySelectorAll('.bd-status:checked'))
+      .map(function (c) { return c.value; });
+  }
+
+  function distinct(rows, field) {
+    var seen = {};
+    rows.forEach(function (r) { seen[r[field]] = true; });
+    return Object.keys(seen).sort();
+  }
+
+  // Populate the Project / Funding-source filter dropdowns from the data,
+  // preserving any selections the user already made.
+  function buildFilters() {
+    var rows = snapshot.breakdownRows || [];
+    fillFilter('filter-projects', distinct(rows, 'project'));
+    fillFilter('filter-sources', distinct(rows, 'fundingSource'));
+  }
+
+  function fillFilter(id, values) {
+    var box = document.getElementById(id);
+    var prev = {};
+    Array.prototype.slice.call(box.querySelectorAll('input'))
+      .forEach(function (i) { prev[i.value] = i.checked; });
+    box.innerHTML = values.map(function (v) {
+      var checked = (v in prev) ? prev[v] : true;
+      return '<label><input type="checkbox" value="' + esc(v) + '"' +
+        (checked ? ' checked' : '') + '> ' + v + '</label>';
+    }).join('');
+    Array.prototype.slice.call(box.querySelectorAll('input')).forEach(function (i) {
+      i.addEventListener('change', function () { updateFilterSummary(id); renderBreakdown(); });
+    });
+    updateFilterSummary(id);
+  }
+
+  function updateFilterSummary(id) {
+    var box = document.getElementById(id);
+    var all = box.querySelectorAll('input');
+    var on = box.querySelectorAll('input:checked');
+    var sum = document.getElementById(id + '-sum');
+    var base = (id === 'filter-projects') ? 'Projects' : 'Funding sources';
+    sum.textContent = (on.length === all.length)
+      ? base + ' (all)' : base + ' (' + on.length + '/' + all.length + ')';
+  }
+
+  function selectedValues(id) {
+    return Array.prototype.slice.call(document.querySelectorAll('#' + id + ' input:checked'))
+      .map(function (c) { return c.value; });
+  }
+
   function renderBreakdown() {
     if (!snapshot) return;
     var dims = selectedDims();
-    var rows = snapshot.breakdownRows || [];
+    var statuses = selectedStatuses();
+    var projects = selectedValues('filter-projects');
+    var sources = selectedValues('filter-sources');
+    var rows = (snapshot.breakdownRows || []).filter(function (r) {
+      if (projects.indexOf(r.project) === -1) return false;
+      if (sources.indexOf(r.fundingSource) === -1) return false;
+      // Keep rows whose status is ticked; rows with an unrecognised status
+      // (e.g. unmatched Xero actuals) always show so nothing is silently hidden.
+      if (r.status === 'secured' || r.status === 'proposed') {
+        return statuses.indexOf(r.status) !== -1;
+      }
+      return true;
+    });
 
     // Group by the chosen dimensions (or one "All" group if none chosen).
     var groups = {};
@@ -104,13 +168,61 @@
     return v;
   }
 
-  Array.prototype.slice.call(document.querySelectorAll('.bd-dim')).forEach(function (c) {
+  Array.prototype.slice.call(document.querySelectorAll('.bd-dim, .bd-status')).forEach(function (c) {
     c.addEventListener('change', renderBreakdown);
+  });
+
+  Array.prototype.slice.call(document.querySelectorAll('.bd-dd-actions a')).forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      var id = a.dataset.target, on = a.dataset.act === 'all';
+      Array.prototype.slice.call(document.querySelectorAll('#' + id + ' input'))
+        .forEach(function (i) { i.checked = on; });
+      updateFilterSummary(id);
+      renderBreakdown();
+    });
+  });
+
+  // Close filter dropdowns on outside click (and only keep one open at a time).
+  document.addEventListener('click', function (e) {
+    Array.prototype.slice.call(document.querySelectorAll('.bd-dd[open]')).forEach(function (d) {
+      if (!d.contains(e.target)) d.removeAttribute('open');
+    });
+  });
+  // Close on Escape.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      Array.prototype.slice.call(document.querySelectorAll('.bd-dd[open]'))
+        .forEach(function (d) { d.removeAttribute('open'); });
+    }
   });
 
   function card(label, value, cls) {
     return '<div class="card"><div class="label">' + label + '</div>' +
       '<div class="value ' + (cls || '') + '">' + value + '</div></div>';
+  }
+
+  function monthYear(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  function dayMonthYear(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  function renderCoverage(c) {
+    var el = document.getElementById('coverage');
+    if (!c) { el.innerHTML = ''; return; }
+    el.innerHTML =
+      '<span>Financial year <b>' + c.fyLabel + '</b> (' + monthYear(c.fyStart) +
+        ' – ' + monthYear(c.fyEnd) + ')</span>' +
+      '<span class="sep">·</span>' +
+      '<span>Today <b>' + dayMonthYear(c.today) + '</b></span>' +
+      '<span class="sep">·</span>' +
+      '<span>Budgeted &amp; forecast <b>' + monthYear(c.forecastStart) +
+        ' – ' + monthYear(c.forecastEnd) + '</b></span>';
   }
 
   function load(force) {
@@ -144,24 +256,43 @@
     t.addEventListener('click', function () { switchView(t.dataset.view); });
   });
 
+  var currentEntityId = null;
+  var currentMeasure = 'cost';
+
+  Array.prototype.slice.call(document.querySelectorAll('.measure')).forEach(function (b) {
+    b.addEventListener('click', function () {
+      currentMeasure = b.dataset.measure;
+      document.querySelectorAll('.measure').forEach(function (x) {
+        x.classList.toggle('active', x === b);
+      });
+      if (currentEntityId) loadTracking(currentEntityId);
+    });
+  });
+
+  var MLAB = {
+    cost:   { base: 'Budget',     actual: 'Actual',      expected: 'Expected',     baseCell: 'budget' },
+    income: { base: 'Budgeted',   actual: 'Received',    expected: 'Expected',     baseCell: 'expected' },
+    net:    { base: 'Budget net', actual: 'Net to date', expected: 'Expected net', baseCell: 'net' }
+  };
+
   function loadSources() {
     var sel = document.getElementById('source-select');
     sel.innerHTML = '<option>loading…</option>';
     google.script.run.withSuccessHandler(function (list) {
-      if (!list.length) { sel.innerHTML = '<option>no funding sources</option>'; return; }
+      if (!list.length) { sel.innerHTML = '<option>nothing to track</option>'; return; }
       sel.innerHTML = list.map(function (s) {
-        return '<option value="' + s.source + '">' + s.source +
-          ' (' + s.status + ' · ' + s.project + ')</option>';
+        return '<option value="' + esc(s.id) + '">' + s.label + '</option>';
       }).join('');
       sel.onchange = function () { loadTracking(sel.value); };
-      loadTracking(list[0].source);
+      loadTracking(list[0].id);
     }).withFailureHandler(trackError).apiListSources();
   }
 
-  function loadTracking(source) {
-    document.getElementById('track-status').textContent = 'loading ' + source + '…';
+  function loadTracking(id) {
+    currentEntityId = id;
+    document.getElementById('track-status').textContent = 'loading…';
     google.script.run.withSuccessHandler(renderTracking)
-      .withFailureHandler(trackError).apiGetTracking(source);
+      .withFailureHandler(trackError).apiGetTracking(id, currentMeasure);
   }
 
   function trackError(e) {
@@ -169,77 +300,105 @@
   }
 
   function renderTracking(t) {
+    var measure = t.measure || 'cost';
+    var lab = MLAB[measure];
+    document.querySelectorAll('.measure').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.measure === measure);
+    });
+    var meta = (t.type === 'project' ? 'project' : (t.status + ' · ' + t.project));
     document.getElementById('track-status').textContent =
-      t.status + ' · ' + t.project + ' · current ' + t.currentQuarter;
+      meta + ' · ' + measure + ' · current ' + t.currentQuarter;
 
     var head = '<thead><tr><th class="mile">Milestone</th>' +
-      t.quarters.map(function (q) {
-        var cur = q === t.currentQuarter ? ' cur' : '';
-        return '<th class="' + cur.trim() + '">' + q + '</th>';
+      t.columns.map(function (col) {
+        var cls = (col.current ? ' cur' : '') + (col.type === 'aggregate' ? ' agg' : '');
+        return '<th class="' + cls.trim() + '">' + col.label + '</th>';
       }).join('') +
-      '<th class="tot">Budget</th><th class="tot">Actual</th>' +
-      '<th class="tot">Expected</th><th class="tot">Variance</th></tr></thead>';
+      '<th class="tot">' + lab.base + '</th><th class="tot">' + lab.actual + '</th>' +
+      '<th class="tot">' + lab.expected + '</th><th class="tot">Variance</th>' +
+      '<th class="cmt-h">Comment</th></tr></thead>';
 
     var body = '<tbody>' + t.milestones.map(function (m) {
-      var cells = m.cells.map(function (c) {
-        var cur = c.quarter === t.currentQuarter ? ' cur' : '';
+      var cells = m.cells.map(function (c, i) {
+        var col = t.columns[i];
+        var cls = (col.current ? ' cur' : '') + (col.type === 'aggregate' ? ' agg' : '');
         if (c.editable) {
-          return '<td class="' + cur.trim() + '"><div class="cell-q">' +
+          return '<td class="' + cls.trim() + '"><div class="cell-q">' +
             '<input class="fc' + (c.hasOverride ? ' override' : '') + '" type="number" ' +
-            'value="' + Math.round(c.forecast) + '" ' +
-            'data-item="' + m.item + '" data-mile="' + esc(m.milestone) + '" ' +
-            'data-q="' + c.quarter + '" data-base="' + Math.round(c.baseline) + '">' +
-            '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
+            'value="' + c.forecast + '" ' +
+            'data-source="' + esc(m.source) + '" data-item="' + esc(m.item) + '" ' +
+            'data-mile="' + esc(m.milestone) + '" data-q="' + col.label + '">' +
+            '<span class="cell-base">' + lab.baseCell + ' ' + money0(c.baseline) + '</span></div></td>';
         }
-        return '<td class="' + cur.trim() + '"><div class="cell-q">' +
-          '<span class="cell-actual">' + money0(c.actual) + '</span>' +
-          '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
+        return '<td class="' + cls.trim() + '"><div class="cell-q">' +
+          '<span class="cell-actual">' + money0(c.effective) + '</span>' +
+          '<span class="cell-base">' + lab.baseCell + ' ' + money0(c.baseline) + '</span></div></td>';
       }).join('');
       return '<tr><td class="mile">' + m.milestone + '</td>' + cells +
         '<td class="tot">' + money0(m.baselineTotal) + '</td>' +
         '<td class="tot">' + money0(m.actualToDate) + '</td>' +
         '<td class="tot">' + money0(m.expectedTotal) + '</td>' +
-        '<td class="tot ' + varClass(m.variance) + '">' + signed(m.variance) + '</td></tr>';
+        '<td class="tot ' + varClassM(m.variance, measure) + '">' + signed(m.variance) + '</td>' +
+        '<td class="cmt-c"><input class="cmt" type="text" value="' + esc(m.comment) + '" ' +
+          'placeholder="why this forecast…" data-source="' + esc(m.source) + '" ' +
+          'data-item="' + esc(m.item) + '" data-mile="' + esc(m.milestone) + '"></td></tr>';
     }).join('') + '</tbody>';
 
     var foot = '<tfoot><tr><td class="mile">Total</td>' +
-      t.colTotals.map(function (c) {
-        var cur = c.quarter === t.currentQuarter ? ' cur' : '';
-        var val = quarterIsPast(c.quarter, t.currentQuarter) ? c.actual : c.effective;
-        return '<td class="' + cur.trim() + '">' + money0(val) + '</td>';
+      t.colTotals.map(function (c, i) {
+        var col = t.columns[i];
+        var cls = (col.current ? ' cur' : '') + (col.type === 'aggregate' ? ' agg' : '');
+        return '<td class="' + cls.trim() + '">' + money0(c.effective) + '</td>';
       }).join('') +
       '<td class="tot">' + money0(t.totals.baseline) + '</td>' +
       '<td class="tot">' + money0(t.totals.actual) + '</td>' +
       '<td class="tot">' + money0(t.totals.expected) + '</td>' +
-      '<td class="tot ' + varClass(t.totals.variance) + '">' + signed(t.totals.variance) + '</td></tr></tfoot>';
+      '<td class="tot ' + varClassM(t.totals.variance, measure) + '">' + signed(t.totals.variance) + '</td>' +
+      '<td></td></tr></tfoot>';
 
     document.getElementById('track-grid').innerHTML = head + body + foot;
 
     document.getElementById('track-totals').innerHTML =
-      tot('Budget', money0(t.totals.baseline)) +
-      tot('Actual to date', money0(t.totals.actual)) +
-      tot('Expected (actual + forecast)', money0(t.totals.expected)) +
-      tot('Variance vs budget', '<span class="' + varClass(t.totals.variance) + '">' +
+      tot(lab.base, money0(t.totals.baseline)) +
+      tot(lab.actual + ' to date', money0(t.totals.actual)) +
+      tot(lab.expected + ' (actual + forecast)', money0(t.totals.expected)) +
+      tot('Variance', '<span class="' + varClassM(t.totals.variance, measure) + '">' +
         signed(t.totals.variance) + '</span>');
 
     document.querySelectorAll('input.fc').forEach(function (inp) {
-      inp.addEventListener('change', function () { saveForecast(t.source, inp); });
+      inp.addEventListener('change', function () { saveForecast(inp); });
+    });
+    document.querySelectorAll('input.cmt').forEach(function (inp) {
+      inp.addEventListener('change', function () { saveComment(inp); });
     });
   }
 
-  function saveForecast(source, inp) {
+  function saveForecast(inp) {
     var raw = inp.value.trim();
-    var cost = raw === '' ? null : Number(raw);
+    var val = raw === '' ? null : Number(raw);
     document.getElementById('track-status').textContent = 'saving…';
     google.script.run.withSuccessHandler(renderTracking).withFailureHandler(trackError)
-      .apiSaveForecast(source, inp.dataset.mile, inp.dataset.item, inp.dataset.q, cost);
+      .apiSaveForecast(currentEntityId, inp.dataset.source, inp.dataset.mile,
+        inp.dataset.item, inp.dataset.q, currentMeasure, val);
   }
 
-  function quarterIsPast(q, cur) { return qNum(q) < qNum(cur); }
-  function qNum(label) { var p = label.split(' Q'); return parseInt(p[0], 10) * 4 + parseInt(p[1], 10); }
+  function saveComment(inp) {
+    document.getElementById('track-status').textContent = 'saving…';
+    google.script.run.withSuccessHandler(renderTracking).withFailureHandler(trackError)
+      .apiSaveComment(currentEntityId, inp.dataset.source, inp.dataset.mile,
+        inp.dataset.item, inp.value, currentMeasure);
+  }
+
   function money0(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('en-NZ'); }
   function signed(n) { n = Math.round(n); return (n > 0 ? '+' : '') + money0(n).replace('$-', '-$'); }
   function varClass(n) { return n > 0 ? 'var-pos' : (n < 0 ? 'var-neg' : ''); }
+  // For cost, spending over budget (positive variance) is bad (red). For income
+  // and net, exceeding budget (positive) is good (green) - so invert.
+  function varClassM(n, measure) {
+    if (n === 0) return '';
+    var favourable = (measure === 'cost') ? (n < 0) : (n > 0);
+    return favourable ? 'var-neg' : 'var-pos';
+  }
   function tot(label, val) { return '<span><span class="lbl">' + label + '</span>' + val + '</span>'; }
   function esc(s) { return String(s).replace(/"/g, '&quot;'); }
 </script>

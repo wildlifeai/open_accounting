@@ -50,33 +50,68 @@ function apiXeroStatus() {
     authUrl: service.hasAccess() ? null : service.getAuthorizationUrl() };
 }
 
-/** Client API: the list of funding sources for the tracking selector. */
+/**
+ * Client API: the entities selectable in the tracking dropdown.
+ * The General project (aggregated across funding sources) is listed first,
+ * followed by each funding source. Each entry: { id, label, type }.
+ */
 function apiListSources() {
   const snap = getSnapshot();
-  return (snap.tracking || []).map(t => ({
-    source: t.source, status: t.status, project: t.project }));
+  const entries = [];
+  const hasGeneral = (snap.tracking || []).some(t =>
+    (t.milestones || []).some(m => m.project === CONFIG.GENERAL_PROJECT));
+  if (hasGeneral) {
+    entries.push({ id: 'project:' + CONFIG.GENERAL_PROJECT,
+      label: CONFIG.GENERAL_PROJECT + ' (project)', type: 'project' });
+  }
+  (snap.tracking || []).forEach(t => entries.push({
+    id: t.source, label: t.source + ' (' + t.status + ' · ' + t.project + ')',
+    type: 'source' }));
+  return entries;
 }
 
 /**
- * Client API: the quarterly tracking grid for one funding source, with the live
- * forecast layered on (so GM edits show without a full refresh).
+ * Client API: the quarterly tracking grid for one entity id (a funding source
+ * name, or 'project:<Name>'), with the live forecast layered on.
  */
-function apiGetTracking(sourceName) {
+function apiGetTracking(id, measure) {
   const snap = getSnapshot();
-  const trackingSource = (snap.tracking || []).filter(t => t.source === sourceName)[0];
-  if (!trackingSource) throw new Error('Unknown funding source: ' + sourceName);
-  return composeTrackingForSource(
-    trackingSource, getForecastMap(), snap.currentQuarter || currentQuarterLabel());
+  const currentQi = quarterSortNum(snap.currentQuarter || currentQuarterLabel());
+  return composeTracking(resolveEntity_(snap, id), getForecastMap(), currentQi, measure);
+}
+
+/** Build the entity (source or aggregated project) the tracking grid renders. */
+function resolveEntity_(snap, id) {
+  const tracking = snap.tracking || [];
+  if (id.indexOf('project:') === 0) {
+    const projectName = id.substring('project:'.length);
+    const milestones = [];
+    tracking.forEach(t => (t.milestones || []).forEach(m => {
+      if (m.project === projectName) milestones.push(m);
+    }));
+    if (!milestones.length) throw new Error('No milestones for project: ' + projectName);
+    return { id: id, label: projectName + ' (project)', type: 'project',
+      project: projectName, milestones: milestones };
+  }
+  const src = tracking.filter(t => t.source === id)[0];
+  if (!src) throw new Error('Unknown funding source: ' + id);
+  return { id: id, label: id, type: 'source', source: id, status: src.status,
+    project: src.project, milestones: src.milestones };
 }
 
 /**
- * Client API: save one forecast cell. `cost` of null clears the override (reverts
- * to baseline). Returns the recomposed grid for the source so the UI can refresh
- * totals without another round trip.
+ * Client API: save one forecast amount cell for a measure ('cost' | 'income').
+ * A null value clears that measure. Returns the recomposed grid (same measure).
  */
-function apiSaveForecast(sourceName, milestone, item, quarter, cost) {
-  upsertForecast(sourceName, milestone, item, quarter, cost);
-  return apiGetTracking(sourceName);
+function apiSaveForecast(entityId, source, milestone, item, quarter, measure, value) {
+  upsertForecast(source, milestone, item, quarter, measure, value);
+  return apiGetTracking(entityId, measure);
+}
+
+/** Client API: save a milestone's forecast Comment. Returns the recomposed grid. */
+function apiSaveComment(entityId, source, milestone, item, comment, measure) {
+  upsertForecastComment(source, milestone, item, comment);
+  return apiGetTracking(entityId, measure);
 }
 
 // ---- Admin menu (only appears when bound to a spreadsheet) -----------------

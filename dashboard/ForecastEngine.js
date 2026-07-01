@@ -50,17 +50,67 @@ const DateMath = {
   }
 };
 
-// ---- quarterly helpers (for the forecast/tracking layer) -------------------
+// ---- financial-year quarter helpers (for the forecast/tracking layer) ------
+// Quarters follow the organisation's financial year (FY starts in
+// CONFIG.FINANCIAL_YEAR_START_MONTH, default April). A quarter is identified
+// internally by a sortable integer index `qi`, and labelled like "25/26 Q1"
+// (the FY running Apr 2025 - Mar 2026, first quarter Apr-Jun).
 
-function quarterLabel_(year, q) { return year + ' Q' + q; }
+function fyStartMonth_() { return CONFIG.FINANCIAL_YEAR_START_MONTH || 4; } // 1-based
 
-/** 'YYYY-MM' -> '2026 Q2'. */
-function quarterOfMonthKey_(monthKey) {
-  const p = monthKey.split('-');
-  return quarterLabel_(parseInt(p[0], 10), Math.floor((parseInt(p[1], 10) - 1) / 3) + 1);
+/** Quarter index (sortable int) containing a Date. */
+function qiOfDate_(date) {
+  const fs = fyStartMonth_();
+  const m1 = date.getMonth() + 1;                 // 1-based month
+  const offset = ((m1 - fs) + 12) % 12;           // months since FY start
+  const q = Math.floor(offset / 3);               // 0..3
+  const fyStartYear = (m1 >= fs) ? date.getFullYear() : date.getFullYear() - 1;
+  return fyStartYear * 4 + q;
 }
 
-/** Roll a { 'YYYY-MM': n } month map up into { '2026 Q2': n }. */
+function qiOfMonthKey_(monthKey) {
+  const p = monthKey.split('-');
+  return qiOfDate_(new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, 1));
+}
+
+/** "25/26 Q1" label for a quarter index. */
+function labelOfQi_(qi) {
+  const fyStartYear = Math.floor(qi / 4);
+  const q = (qi % 4) + 1;
+  const a = ('0' + (fyStartYear % 100)).slice(-2);
+  const b = ('0' + ((fyStartYear + 1) % 100)).slice(-2);
+  return a + '/' + b + ' Q' + q;
+}
+
+/** Parse a "25/26 Q1" label back to its quarter index. */
+function qiOfLabel_(label) {
+  const m = /^(\d{2})\/(\d{2}) Q([1-4])$/.exec(label);
+  if (!m) return 0;
+  return (2000 + parseInt(m[1], 10)) * 4 + (parseInt(m[3], 10) - 1);
+}
+
+function quarterOfMonthKey_(monthKey) { return labelOfQi_(qiOfMonthKey_(monthKey)); }
+function currentQuarterLabel(date) { return labelOfQi_(qiOfDate_(date || new Date())); }
+function quarterSortNum(label) { return qiOfLabel_(label); }
+
+/** Short financial-year label for a FY-start year, e.g. 2025 -> "25/26". */
+function fyLabel_(fyStartYear) {
+  return ('0' + (fyStartYear % 100)).slice(-2) + '/' + ('0' + ((fyStartYear + 1) % 100)).slice(-2);
+}
+
+/** The financial-year bounds containing `date`. */
+function fyBounds_(date) {
+  const fs = fyStartMonth_();
+  const fyStartYear = Math.floor(qiOfDate_(date || new Date()) / 4);
+  return {
+    startYear: fyStartYear,
+    label: fyLabel_(fyStartYear),
+    start: new Date(fyStartYear, fs - 1, 1),
+    end: new Date(fyStartYear + 1, fs - 1, 0) // last day before the next FY starts
+  };
+}
+
+/** Roll a { 'YYYY-MM': n } month map up into FY-quarter labels. */
 function bucketToQuarters(monthMap) {
   const out = {};
   Object.keys(monthMap).forEach(k => {
@@ -68,18 +118,6 @@ function bucketToQuarters(monthMap) {
     out[ql] = (out[ql] || 0) + monthMap[k];
   });
   return out;
-}
-
-/** The quarter label containing `date` (defaults to today). */
-function currentQuarterLabel(date) {
-  date = date || new Date();
-  return quarterLabel_(date.getFullYear(), Math.floor(date.getMonth() / 3) + 1);
-}
-
-/** Sortable integer for a '2026 Q2' label. */
-function quarterSortNum(label) {
-  const p = label.split(' Q');
-  return parseInt(p[0], 10) * 4 + parseInt(p[1], 10);
 }
 
 /**
