@@ -9,7 +9,7 @@ This script parses funding source budget sheets for the four main projects and g
 ### Configuration
 
 - **Budgets Folder ID**: `10105co6S5qHFSVVg0pb0fkoPidN3ScJZ`
-- **Projects**: Spyfish Aotearoa (SPY), General (GEN), Wild About AI (WAA), Wildlife Watcher (WLW).
+- **Projects**: Spyfish Aotearoa (SPY), General (GEN), Wild About AI (WAI), Wildlife Watcher (WW).
 - **Target Sheet**: The script looks specifically for the tab named `Budget, Actual, Forecast Tracking`.
 - **Extracted Columns**: G, I, J, K, L (indices 6, 8, 9, 10, 11).
 

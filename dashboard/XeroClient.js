@@ -19,7 +19,7 @@ function getXeroService() {
     .setClientId(getSecret('XERO_CLIENT_ID'))
     .setClientSecret(getSecret('XERO_CLIENT_SECRET'))
     .setCallbackFunction('xeroAuthCallback')
-    .setPropertyStore(PropertiesService.getUserProperties())
+    .setPropertyStore(PropertiesService.getScriptProperties())
     .setScope(CONFIG.XERO.SCOPE)
     .setParam('response_type', 'code')
     // Xero requires a fixed redirect URI registered on the app; getRedirectUri()
@@ -85,6 +85,9 @@ function getXeroTenantId() {
     headers: { Authorization: 'Bearer ' + getXeroService().getAccessToken() },
     muteHttpExceptions: true
   });
+  if (resp.getResponseCode() >= 300) {
+    throw new Error('Xero connections API ' + resp.getResponseCode() + ': ' + resp.getContentText());
+  }
   const connections = JSON.parse(resp.getContentText());
   if (!connections.length) throw new Error('No Xero organisations connected to this app.');
   tenantId = connections[0].tenantId;
@@ -107,6 +110,10 @@ function logXeroConnections() {
     headers: { Authorization: 'Bearer ' + getXeroService().getAccessToken() },
     muteHttpExceptions: true
   });
+  if (resp.getResponseCode() >= 300) {
+    Logger.log('Error fetching Xero connections (' + resp.getResponseCode() + '): ' + resp.getContentText());
+    return;
+  }
   const connections = JSON.parse(resp.getContentText());
   if (!connections.length) { Logger.log('No organisations connected.'); return; }
   connections.forEach(c => Logger.log(
@@ -207,7 +214,7 @@ function normaliseLine_(li, date, kind) {
     fundingSource: trackingValue_(li.Tracking, CONFIG.XERO.FUNDING_TRACKING_CATEGORY),
     item: code,
     itemName: li.Item ? (li.Item.Name || '') : '',
-    amount: Math.abs(Number(li.LineAmount) || 0),
+    amount: Number(li.LineAmount) || 0,
     kind: kind
   };
 }

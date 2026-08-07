@@ -43,7 +43,7 @@
     renderBreakdown();
 
     document.getElementById('flags').innerHTML =
-      s.dataFlags.map(function (f) { return '<div>⚠ ' + f + '</div>'; }).join('');
+      s.dataFlags.map(function (f) { return '<div>⚠ ' + esc(f) + '</div>'; }).join('');
   }
 
   var DIM_LABEL = { project: 'Project', fundingSource: 'Funding source', status: 'Status' };
@@ -80,7 +80,7 @@
     box.innerHTML = values.map(function (v) {
       var checked = (v in prev) ? prev[v] : true;
       return '<label><input type="checkbox" value="' + esc(v) + '"' +
-        (checked ? ' checked' : '') + '> ' + v + '</label>';
+        (checked ? ' checked' : '') + '> ' + esc(v) + '</label>';
     }).join('');
     Array.prototype.slice.call(box.querySelectorAll('input')).forEach(function (i) {
       i.addEventListener('change', function () { updateFilterSummary(id); renderBreakdown(); });
@@ -152,7 +152,7 @@
       var over = pct > 100;
       var color = over ? COLOR.danger : COLOR.ok;
       var dimCells = dims.length
-        ? g.dimVals.map(function (v) { return '<td>' + statusLabel(v) + '</td>'; }).join('')
+        ? g.dimVals.map(function (v) { return '<td>' + esc(statusLabel(v)) + '</td>'; }).join('')
         : '<td>All funding</td>';
       return '<tr>' + dimCells +
         '<td class="num">' + fmtMoney(g.budget) + '</td>' +
@@ -321,7 +321,7 @@
     google.script.run.withSuccessHandler(function (list) {
       if (!list.length) { sum.textContent = 'nothing to track'; return; }
       box.innerHTML = list.map(function (s) {
-        return '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + s.label + '</label>';
+        return '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.label) + '</label>';
       }).join('');
       box.querySelector('input').checked = true;
       
@@ -387,7 +387,7 @@
     var head = '<thead><tr><th class="mile">Milestone</th>' +
       t.columns.map(function (col) {
         var cls = (col.current ? ' cur' : '') + (col.type === 'aggregate' ? ' agg' : '');
-        return '<th class="' + cls.trim() + '">' + col.label + '</th>';
+        return '<th class="' + cls.trim() + '">' + esc(col.label) + '</th>';
       }).join('') +
       '<th class="tot">' + lab.base + '</th><th class="tot">' + lab.actual + '</th>' +
       '<th class="tot">' + lab.expected + '</th><th class="tot">Variance</th>' +
@@ -402,14 +402,14 @@
             '<input class="fc' + (c.hasOverride ? ' override' : '') + '" type="number" ' +
             'value="' + c.forecast + '" ' +
             'data-source="' + esc(m.source) + '" data-item="' + esc(m.item) + '" ' +
-            'data-mile="' + esc(m.milestone) + '" data-q="' + col.label + '">' +
+            'data-mile="' + esc(m.milestone) + '" data-q="' + esc(col.label) + '">' +
             '<span class="cell-base">' + lab.baseCell + ' ' + money0(c.baseline) + '</span></div></td>';
         }
         return '<td class="' + cls.trim() + '"><div class="cell-q">' +
           '<span class="cell-actual">' + money0(c.effective) + '</span>' +
           '<span class="cell-base">' + lab.baseCell + ' ' + money0(c.baseline) + '</span></div></td>';
       }).join('');
-      return '<tr><td class="mile">' + m.milestone + '</td>' + cells +
+      return '<tr><td class="mile">' + esc(m.milestone) + '</td>' + cells +
         '<td class="tot">' + money0(m.baselineTotal) + '</td>' +
         '<td class="tot">' + money0(m.actualToDate) + '</td>' +
         '<td class="tot">' + money0(m.expectedTotal) + '</td>' +
@@ -476,5 +476,12 @@
     return favourable ? 'var-neg' : 'var-pos';
   }
   function tot(label, val) { return '<span><span class="lbl">' + label + '</span>' + val + '</span>'; }
-  function esc(s) { return String(s).replace(/"/g, '&quot;'); }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 </script>
