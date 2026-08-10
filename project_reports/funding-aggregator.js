@@ -1,7 +1,30 @@
 /**
- * Script to be stored in GitHub public repository
- * Aggregates funding data from PROJECT_YEAR_FUNDING sheets
+ * Aggregates funding data from PROJECT_YEAR_FUNDING sheets.
+ *
+ * Bound to the PROJECT_overview spreadsheet and deployed with clasp. This file
+ * used to be fetched from a raw GitHub URL and run through eval() by
+ * loader_template.js; that loader has been removed - see project_reports/README.md.
  */
+
+/** Adds the Funding Tools menu when the spreadsheet opens. */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Funding Tools')
+    .addItem('Update Funding Data', 'runFundingAggregation')
+    .addToUi();
+}
+
+/** Menu entry point: runs the aggregation and reports the outcome. */
+function runFundingAggregation() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    aggregateFundingData();
+    ui.alert('Success!', 'Funding data has been updated.', ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('Error', 'Failed to update funding data: ' + error.toString(), ui.ButtonSet.OK);
+    Logger.log('Error: ' + error.toString());
+  }
+}
 
 function aggregateFundingData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
