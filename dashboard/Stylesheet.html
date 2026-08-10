@@ -112,31 +112,99 @@
     border-radius: 8px; background: var(--bg); color: var(--text); }
   .track-status { font-size: 12px; color: var(--hint); }
   .track-help { font-size: 12px; color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
+  .track-sheet-links { font-size: 12px; display: inline-flex; flex-wrap: wrap; gap: 8px;
+    margin-left: 4px; }
+  .track-sheet-links a { color: var(--green); text-decoration: none; }
+  .track-sheet-links a:hover { text-decoration: underline; }
+  .cmt-text { font-size: 12px; color: var(--muted); }
   .track-grid-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
-  #track-grid { width: 100%; border-collapse: collapse; font-size: 13px; }
-  #track-grid th, #track-grid td { padding: 8px 10px; text-align: right; white-space: nowrap; }
-  #track-grid thead th { background: var(--bg2); color: var(--muted); font-weight: 500; }
-  #track-grid th.mile, #track-grid td.mile { text-align: left; position: sticky; left: 0;
+  #track-grid table, #track-grid-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #track-grid th, #track-grid td, #track-grid-table th, #track-grid-table td { padding: 8px 10px; text-align: right; white-space: nowrap; }
+  #track-grid thead th, #track-grid-table thead th { background: var(--bg2); color: var(--muted); font-weight: 500; }
+  #track-grid th.mile, #track-grid td.mile, #track-grid-table th.mile, #track-grid-table td.mile { text-align: left; position: sticky; left: 0;
     background: var(--bg); min-width: 160px; }
-  #track-grid thead th.mile { background: var(--bg2); }
-  #track-grid tbody tr { border-top: 1px solid var(--line); }
-  #track-grid th.cur, #track-grid td.cur { background: rgba(29,158,117,.06); }
+  #track-grid thead th.mile, #track-grid-table thead th.mile { background: var(--bg2); }
+  #track-grid tbody tr, #track-grid-table tbody tr { border-top: 1px solid var(--line); }
+  #track-grid th.cur, #track-grid td.cur, #track-grid-table th.cur, #track-grid-table td.cur { background: rgba(29,158,117,.06); }
+
+  /* Zone header (ACTUAL / FORECAST spanning row) */
+  .zone-row th { padding: 6px 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+    text-align: center; border-bottom: 2px solid var(--line); }
+  .zone-actual { background: rgba(29,158,117,.10); color: var(--green); }
+  .zone-forecast { background: rgba(239,159,39,.10); color: var(--amber-text); }
+  .zone-totals { background: var(--bg2); color: var(--muted); }
+  .zone-src { font-weight: 400; font-size: 10px; opacity: 0.7; }
+
+  /* Column tints by zone */
+  .col-actual { background: rgba(29,158,117,.04); }
+  .col-forecast { background: rgba(239,159,39,.04); }
+  .col-current { background: rgba(29,158,117,.10) !important; }
+  thead .col-actual { background: rgba(29,158,117,.08); }
+  thead .col-forecast { background: rgba(239,159,39,.08); }
+  thead .col-current { background: rgba(29,158,117,.14) !important; }
+  tfoot .col-actual { background: rgba(29,158,117,.06); }
+  tfoot .col-forecast { background: rgba(239,159,39,.06); }
   .cell-actual { color: var(--text); }
   .cell-base { display: block; font-size: 11px; color: var(--hint); margin-top: 2px; }
   .cell-q { display: flex; flex-direction: column; align-items: flex-end; }
+  .no-fc { color: var(--hint); font-size: 12px; }
   input.fc { font: inherit; font-size: 13px; width: 84px; text-align: right; padding: 4px 6px;
     border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
   input.fc.override { border-color: var(--green); }
   input.fc:focus { outline: 2px solid var(--green); outline-offset: -1px; }
-  #track-grid th.agg, #track-grid td.agg { background: rgba(0,0,0,.03); }
-  #track-grid th.cmt-h, #track-grid td.cmt-c { text-align: left; min-width: 180px; }
+  #track-grid th.agg, #track-grid td.agg, #track-grid-table th.agg, #track-grid-table td.agg { background: rgba(0,0,0,.03); }
+  #track-grid th.cmt-h, #track-grid td.cmt-c, #track-grid-table th.cmt-h, #track-grid-table td.cmt-c { text-align: left; min-width: 180px; }
   input.cmt { font: inherit; font-size: 12px; width: 100%; min-width: 160px; padding: 4px 6px;
     border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
   input.cmt:focus { outline: 2px solid var(--green); outline-offset: -1px; }
   .var-pos { color: var(--red); }
   .var-neg { color: var(--green); }
   td.tot, th.tot { font-weight: 500; border-left: 1px solid var(--line); }
-  #track-grid tfoot td, #overview tfoot td { border-top: 2px solid var(--line); font-weight: 500; background: var(--bg2); }
+  #track-grid tfoot td, #track-grid-table tfoot td, #overview tfoot td { border-top: 2px solid var(--line); font-weight: 500; background: var(--bg2); }
   .track-totals { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 14px; font-size: 13px; }
   .track-totals .lbl { color: var(--muted); margin-right: 6px; }
+
+  /* ---- Project planner (Gantt) ------------------------------------------ */
+  .planner-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .planner-head label { font-size: 13px; color: var(--muted); }
+  .planner-link { font-size: 13px; color: var(--green); text-decoration: none; margin-left: 6px; }
+  .planner-link:hover { text-decoration: underline; }
+  .planner-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px;
+    font-size: 11px; color: var(--hint); }
+
+  .planner-grid { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--bg); }
+  .gantt { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
+  .gantt th, .gantt td { padding: 0; text-align: center; }
+  .gantt thead th { background: var(--bg2); color: var(--muted); font-weight: 500;
+    font-size: 11px; padding: 8px 0; border-left: 1px solid var(--line); white-space: nowrap; }
+  .gantt thead th:first-child { border-left: none; text-align: left; padding-left: 12px; }
+  .gantt thead th.today-col { background: rgba(29,158,117,.1); }
+
+  .gantt tbody tr { border-top: 1px solid var(--line); }
+  .gantt td.gantt-label { text-align: left; padding: 10px 12px; min-width: 170px; max-width: 220px;
+    position: sticky; left: 0; background: var(--bg); z-index: 2; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gantt td.gantt-label .gantt-sub { display: block; font-weight: 400; font-size: 11px;
+    color: var(--muted); margin-top: 2px; }
+
+  .gantt td.gantt-cell { padding: 8px 0; border-left: 1px solid var(--line);
+    position: relative; height: 44px; vertical-align: middle; }
+  .gantt td.gantt-cell.today-col { background: rgba(29,158,117,.05); }
+
+  .gantt-seg { position: absolute; top: 8px; bottom: 8px; border-radius: 4px;
+    min-width: 2px; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: #fff; font-weight: 500; overflow: hidden;
+    white-space: nowrap; cursor: default; z-index: 1; }
+  .gantt-seg.seg-secured { background: var(--green); }
+  .gantt-seg.seg-proposed { background: var(--amber); }
+
+  .gantt-seg .seg-tip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%); background: var(--text); color: #fff; padding: 6px 10px;
+    border-radius: 6px; font-size: 11px; font-weight: 400; white-space: nowrap;
+    z-index: 20; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+  .gantt-seg:hover .seg-tip { display: block; }
+
+  .gantt tfoot td { border-top: 2px solid var(--line); font-weight: 500;
+    background: var(--bg2); padding: 10px 12px; text-align: left; font-size: 12px; color: var(--muted); }
 </style>

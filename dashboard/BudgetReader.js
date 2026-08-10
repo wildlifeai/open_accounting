@@ -46,9 +46,11 @@ function readStatusFolder_(projectFolder, subName, status, out) {
     if (startsWithArchive_(file.getName())) continue;
     try {
       const parsed = parseBudgetFile_(file, projectFolder.getName());
+      const forecast = parseForecastTab_(file);
       out.push({ name: file.getName(), status: status,
         projectFolder: projectFolder.getName(), lines: parsed.lines,
-        hasProjectColumn: parsed.hasProjectColumn });
+        hasProjectColumn: parsed.hasProjectColumn,
+        forecast: forecast.data, sheetUrl: forecast.sheetUrl });
     } catch (e) {
       Logger.log('Skipped ' + file.getName() + ': ' + e.message);
     }
@@ -132,4 +134,87 @@ function parseSheetDate_(value) {
     if (!isNaN(d)) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
   return null;
+}
+
+// ---- Forecast tab reader --------------------------------------------------
+
+/**
+ * Read the "Forecast" tab from a funding source spreadsheet.
+ * Returns { data: { cost, income, comments }, sheetUrl }.
+ * The Forecast tab has Revenue and Expenses sections with item codes in column A
+ * and quarter forecasts in subsequent columns. Stops at "Funding Source Details".
+ */
+function parseForecastTab_(file) {
+  const ss = SpreadsheetApp.openById(file.getId());
+  const sheetUrl = ss.getUrl();
+  const sheet = ss.getSheetByName('Forecast');
+  const empty = { data: { cost: {}, income: {}, comments: {} }, sheetUrl: sheetUrl };
+  if (!sheet) return empty;
+
+  const data = sheet.getDataRange().getValues();
+  if (!data.length) return empty;
+
+  const result = { cost: {}, income: {}, comments: {} };
+  var section = null; // 'revenue' | 'expenses'
+  var quarterCols = []; // [{ col, label }]
+  var commentCol = -1;
+
+  for (var i = 0; i < data.length; i++) {
+    var cellA = clean_(String(data[i][0] || ''));
+
+    // Stop at "Funding Source Details"
+    if (cellA === 'Funding Source Details') break;
+
+    // Detect section headers
+    if (cellA === 'Revenue' || cellA === 'Expenses') {
+      section = cellA.toLowerCase();
+      quarterCols = [];
+      commentCol = -1;
+      for (var j = 1; j < data[i].length; j++) {
+        var header = clean_(String(data[i][j] || ''));
+        if (header.toLowerCase() === 'comments') { commentCol = j; continue; }
+        var ql = parseQuarterHeader_(header);
+        if (ql) quarterCols.push({ col: j, label: ql });
+      }
+      continue;
+    }
+
+    if (!section) continue;
+    // Skip blank, Total, and summary rows
+    if (!cellA || cellA.indexOf('Total') === 0) continue;
+
+    // Extract item code from "CODE - Name" format
+    var code = itemCode_(cellA);
+    if (!code) continue;
+
+    var bucket = (section === 'revenue') ? result.income : result.cost;
+    quarterCols.forEach(function (qc) {
+      var val = data[i][qc.col];
+      if (val !== null && val !== '' && !isNaN(Number(val))) {
+        var key = code + '||' + qc.label;
+        bucket[key] = (bucket[key] || 0) + Number(val);
+      }
+    });
+
+    if (commentCol >= 0) {
+      var comment = clean_(String(data[i][commentCol] || ''));
+      if (comment) result.comments[code] = comment;
+    }
+  }
+
+  return { data: result, sheetUrl: sheetUrl };
+}
+
+/**
+ * Parse a forecast tab header like "Jul-Sep 26 Forecast" into an FY quarter
+ * label like "26/27 Q2". Returns null if the header doesn't match.
+ */
+function parseQuarterHeader_(header) {
+  var m = /^([A-Za-z]{3})-[A-Za-z]{3}\s+(\d{2})\s+Forecast$/i.exec(header);
+  if (!m) return null;
+  var months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  var monthIdx = months.indexOf(m[1].toLowerCase());
+  if (monthIdx === -1) return null;
+  var year = 2000 + parseInt(m[2], 10);
+  return labelOfQi_(qiOfDate_(new Date(year, monthIdx, 1)));
 }

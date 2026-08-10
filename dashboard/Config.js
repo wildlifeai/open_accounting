@@ -83,22 +83,21 @@ const CONFIG = {
     FUNDING_TRACKING_CATEGORY: 'Funding source'
   },
 
-  // ---- Quarterly forecast layer ------------------------------------------
-  // Replaces the per-sheet "Budget, Actual, Forecast Tracking" tab. The GM edits
-  // a forward forecast (spend, per milestone per quarter) in the dashboard; it is
-  // persisted to a single central "Forecast" Google Sheet.
-  // No manual setup needed: if SPREADSHEET_ID is unset (and Script Property
-  // COCKPIT_FORECAST_SHEET_ID is empty), the app auto-creates FILE_NAME inside the
-  // Budgets root folder on first use and remembers its id. Set SPREADSHEET_ID only
-  // to point at a specific existing sheet instead.
-  FORECAST: {
+  // ---- Cockpit Settings spreadsheet ---------------------------------------
+  // A single central Google Sheet stored in the Budgets root folder. Contains
+  // the Permissions tab for role-based access control. Auto-created on first
+  // use if SPREADSHEET_ID is unset.
+  SETTINGS: {
     SPREADSHEET_ID: '',          // leave blank to auto-create
-    FILE_NAME: 'Cockpit Forecast',
-    TAB: 'Forecast',
-    // Amount rows have a Quarter plus a Forecast Cost and/or Forecast Income; a
-    // milestone Comment is stored on its own row (Quarter blank, Comment filled).
-    HEADER: ['Funding Source', 'Milestone', 'Item', 'Quarter', 'Forecast Cost',
-             'Forecast Income', 'Comment', 'Updated By', 'Updated At']
+    FILE_NAME: 'Cockpit Settings',
+    PROPERTY_KEY: 'COCKPIT_SETTINGS_SHEET_ID'
+  },
+
+  // ---- Permissions layer -------------------------------------------------
+  // Stored as a tab in the Cockpit Settings spreadsheet.
+  PERMISSIONS: {
+    TAB: 'Permissions',
+    HEADER: ['Email', 'Allowed Projects (comma separated, or * for all)']
   },
 
   // ---- Financial year -----------------------------------------------------
@@ -116,9 +115,9 @@ const CONFIG = {
   REFRESH_TRIGGER_HOURS: 6
 };
 
-/** Forecast spreadsheet id from Config or Script Property. */
-function getForecastSheetId() {
-  return getSecret('COCKPIT_FORECAST_SHEET_ID') || CONFIG.FORECAST.SPREADSHEET_ID;
+/** Settings spreadsheet id from Config or Script Property. */
+function getSettingsSheetId() {
+  return getSecret(CONFIG.SETTINGS.PROPERTY_KEY) || getSecret('COCKPIT_FORECAST_SHEET_ID') || CONFIG.SETTINGS.SPREADSHEET_ID;
 }
 
 /** Read a secret from Script Properties (returns '' if unset). */
