@@ -21,20 +21,19 @@
  *              milestones: [{ item, milestone, source, baseline:{q:n}, actual:{q:n} }] }
  */
 
-function composeTracking(entity, forecastMap, currentQi, measure) {
+function composeTracking(entity, currentQi, measure) {
   measure = measure || 'cost'; // 'cost' | 'income' | 'net'
-  const amounts = (forecastMap && forecastMap.amounts) || {};
-  const comments = (forecastMap && forecastMap.comments) || {};
   const columns = buildColumns_(entity, currentQi);
 
-  // Pick the baseline/actual maps and forecast-override accessor per measure.
+  // Pick the baseline/actual/forecast maps per measure.
   function layers_(m) {
     if (measure === 'income') return { base: m.incomeBaseline || {}, act: m.incomeActual || {},
-      ov: function (a) { return a ? a.income : null; }, editable: true };
+      fc: m.incomeForecast || {} };
     if (measure === 'net') return { base: diffMap_(m.incomeBaseline, m.baseline),
-      act: diffMap_(m.incomeActual, m.actual), ov: function () { return null; }, editable: false };
+      act: diffMap_(m.incomeActual, m.actual),
+      fc: diffMap_(m.incomeForecast || {}, m.costForecast || {}) };
     return { base: m.baseline || {}, act: m.actual || {},
-      ov: function (a) { return a ? a.cost : null; }, editable: true };
+      fc: m.costForecast || {} };
   }
 
   const milestones = entity.milestones.map(m => {
@@ -44,33 +43,27 @@ function composeTracking(entity, forecastMap, currentQi, measure) {
         const baseline = sumOver_(L.base, col.quarters);
         const actual = sumOver_(L.act, col.quarters);
         return { type: 'aggregate', baseline: Math.round(baseline), actual: Math.round(actual),
-          forecast: null, hasOverride: false, effective: Math.round(actual), editable: false };
+          forecast: null, effective: Math.round(actual), current: false };
       }
       const q = col.label;
       const baseline = L.base[q] || 0;
       const actual = L.act[q] || 0;
-      const amt = amounts[m.source + '||' + m.item + '||' + q];
-      let override = null;
-      if (measure === 'net') {
-        if (amt && (amt.income !== null || amt.cost !== null)) {
-          const inc = amt.income !== null ? amt.income : (m.incomeBaseline && m.incomeBaseline[q] || 0);
-          const cost = amt.cost !== null ? amt.cost : (m.baseline && m.baseline[q] || 0);
-          override = inc - cost;
-        }
-      } else {
-        override = L.editable ? L.ov(amt) : null;
-      }
-      const forecast = override !== null ? override : baseline;
-      const effective = col.past ? actual : forecast;
+      const hasForecast = L.fc[q] !== undefined;
+      const forecast = hasForecast ? L.fc[q] : 0;
+      const isCurrent = col.qi === currentQi;
+      // Past quarters: effective = actual
+      // Current quarter: effective = actual (partial, still accumulating)
+      // Future quarters: effective = forecast from gsheet (0 if no forecast)
+      const effective = col.past ? actual : (isCurrent ? actual : forecast);
       return { type: 'quarter', baseline: Math.round(baseline), actual: Math.round(actual),
-        forecast: Math.round(forecast), hasOverride: override !== null,
-        effective: Math.round(effective), editable: L.editable && !col.past };
+        forecast: Math.round(forecast), hasForecast: hasForecast,
+        effective: Math.round(effective), current: isCurrent };
     });
     const baselineTotal = sumField_(cells, 'baseline');
     const expectedTotal = sumField_(cells, 'effective');
     return {
       item: m.item, milestone: m.milestone, source: m.source,
-      comment: comments[m.source + '||' + m.item] || '',
+      comment: m.forecastComment || '',
       cells: cells,
       baselineTotal: baselineTotal,
       actualToDate: sumField_(cells, 'actual'),
@@ -86,13 +79,17 @@ function composeTracking(entity, forecastMap, currentQi, measure) {
     effective: sumAt_(milestones, i, 'effective')
   }));
 
-  const cellsEditable = measure !== 'net';
+  // Collect sheet URLs from the entity's source tracking entries.
+  const sheetUrls = {};
+  (entity.sheetUrls || []).forEach(su => { if (su.source && su.url) sheetUrls[su.source] = su.url; });
+
   return {
     id: entity.id, label: entity.label, type: entity.type, measure: measure,
     status: entity.status || null, project: entity.project || null,
     currentQuarter: labelOfQi_(currentQi),
+    sheetUrls: sheetUrls,
     columns: columns.map(c => ({ label: c.label, type: c.type,
-      editable: cellsEditable && c.type === 'quarter' && !c.past, current: c.qi === currentQi })),
+      past: c.past || false, current: c.qi === currentQi })),
     milestones: milestones,
     colTotals: colTotals,
     totals: {
@@ -153,8 +150,9 @@ function quarterCol_(qi, currentQi) {
 function collectDataQis_(milestones) {
   const set = {};
   milestones.forEach(m => {
-    Object.keys(m.baseline).forEach(q => (set[qiOfLabel_(q)] = true));
-    Object.keys(m.actual).forEach(q => (set[qiOfLabel_(q)] = true));
+    [m.baseline, m.actual, m.costForecast, m.incomeForecast].forEach(map => {
+      if (map) Object.keys(map).forEach(q => (set[qiOfLabel_(q)] = true));
+    });
   });
   return Object.keys(set).map(Number);
 }

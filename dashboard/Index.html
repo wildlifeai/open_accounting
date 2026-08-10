@@ -22,6 +22,7 @@
     <nav class="tabs">
       <button class="tab active" data-view="overview">Overview</button>
       <button class="tab" data-view="tracking">Quarterly tracking</button>
+      <button class="tab" data-view="planner">Project planner</button>
     </nav>
 
     <div id="view-overview">
@@ -40,6 +41,7 @@
               <label><input type="checkbox" class="bd-dim" value="project" checked> Project</label>
               <label><input type="checkbox" class="bd-dim" value="fundingSource"> Funding source</label>
               <label><input type="checkbox" class="bd-dim" value="status"> Status</label>
+              <label><input type="checkbox" class="bd-dim" value="milestone"> Milestone</label>
             </div>
             <div class="bd-controls">
               <span class="bd-label">show:</span>
@@ -106,18 +108,33 @@
           <button class="measure" data-measure="net">Net</button>
         </div>
         <span id="track-status" class="track-status"></span>
+        <span id="track-sheet-links" class="track-sheet-links"></span>
       </div>
       <p class="track-help">
-        Switch between <strong>Cost</strong>, <strong>Income</strong> (received) and
-        <strong>Net</strong> (income − cost). Past quarters show <strong>actual</strong> from
-        Xero; current and future quarters are your editable <strong>forecast</strong> — type a
-        number to override the baseline (shown underneath), clear it to revert. Net is derived,
-        so it isn't directly editable.
+        Past quarters show <strong>actual</strong> from Xero; the current quarter shows
+        <strong>actual so far</strong>. Future quarters show the <strong>forecast</strong>
+        from each funding source's <em>Forecast</em> tab (with <strong>baseline</strong>
+        underneath). To edit forecasts, click the 📄 link to open the source spreadsheet,
+        update the Forecast tab, then hit <strong>Refresh now</strong>.
       </p>
       <div class="track-grid-wrap">
         <table id="track-grid"></table>
       </div>
       <div id="track-totals" class="track-totals"></div>
+    </div>
+
+    <div id="view-planner" class="hidden">
+      <div class="planner-head">
+        <label for="planner-project">Project</label>
+        <select id="planner-project"></select>
+        <a id="planner-project-link" href="#" target="_blank" class="hidden planner-link">📁 Gdrive folder</a>
+        <span id="planner-status" class="track-status"></span>
+      </div>
+      <div class="planner-legend">
+        <span><i class="sw ok"></i> Secured (confirmed)</span>
+        <span><i class="sw warn"></i> Proposed</span>
+      </div>
+      <div id="planner-grid" class="planner-grid"></div>
     </div>
   </div>
 

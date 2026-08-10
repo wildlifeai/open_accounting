@@ -26,10 +26,11 @@ function buildSnapshot() {
   const projects = {}; // name -> rollup accumulator
   const fundingSources = []; // per-source summary
   const dataFlags = [];
-  const budgetByProjSrc = {}; // 'project||source' -> { budget, income, status }
-  const actualByProjSrc = {}; // 'project||source' -> actual expense
-  const actualByProjSrcFY = {}; // 'project||source' -> FY actual expense
+  const budgetByKey = {}; // 'project||source||milestone' -> { budget, income, status }
+  const actualByKey = {}; // 'project||source||milestone' -> actual expense
+  const actualByKeyFY = {}; // 'project||source||milestone' -> FY actual expense
   const sourceStatus = {};    // source name -> 'secured' | 'proposed'
+  const itemToMilestone = {}; // 'source||itemCode' -> milestone name
 
   function project_(name) {
     if (!projects[name]) {
@@ -47,17 +48,10 @@ function buildSnapshot() {
     const fc = computeFundingSourceForecast(src.lines);
     const shares = projectExpenseShares_(src.lines); // {project: 0..1}
 
-    const projDates = {};
-    src.lines.forEach(l => {
-      const p = l.project || CONFIG.DEFAULT_PROJECT;
-      if (!projDates[p]) projDates[p] = { start: null, end: null };
-      if (l.start && (!projDates[p].start || l.start < projDates[p].start)) projDates[p].start = l.start;
-      if (l.end && (!projDates[p].end || l.end > projDates[p].end)) projDates[p].end = l.end;
-    });
-
     const expenseFY = sumMonthsInFY_(fc.expenseByMonth, fy);
     const incomeFY = sumMonthsInFY_(fc.incomeByMonth, fy);
 
+    // Project-level rollups (unchanged — used for org totals cards)
     Object.keys(shares).forEach(pName => {
       const share = shares[pName];
       const p = project_(pName);
@@ -65,8 +59,6 @@ function buildSnapshot() {
       const incTotal = fc.totalBudgetIncome * share;
       const expFY = expenseFY * share;
       const incFY = incomeFY * share;
-
-      // Proposed budget = secured + proposed; secured income only on secured sources.
       p.proposedBudget += expTotal;
       p.proposedIncome += incTotal;
       p.proposedBudgetFY += expFY;
@@ -75,13 +67,38 @@ function buildSnapshot() {
         p.securedIncome += incTotal;
         p.securedIncomeFY += incFY;
       }
+    });
 
-      const dStart = projDates[pName] ? projDates[pName].start : null;
-      const dEnd = projDates[pName] ? projDates[pName].end : null;
+    // Build budgetByKey at (project, source, milestone) granularity.
+    // Each budget line carries its own cost, income, milestone, and project.
+    src.lines.forEach(l => {
+      const pName = l.project || CONFIG.DEFAULT_PROJECT;
+      const mile = l.milestone || '(unassigned)';
+      const bkey = pName + '||' + src.name + '||' + mile;
 
-      budgetByProjSrc[pName + '||' + src.name] =
-        { budget: expTotal, income: incTotal, status: src.status,
-          budgetFY: expFY, incomeFY: incFY, start: isoOrNull_(dStart), end: isoOrNull_(dEnd) };
+      // Build item-to-milestone lookup for actuals mapping
+      const code = itemCode_(l.item);
+      if (code) itemToMilestone[src.name + '||' + code] = mile;
+
+      // Day-weighted FY portion for this single line
+      const lineCostByMonth = distributeByMonth_([l], 'cost');
+      const lineIncByMonth = distributeByMonth_([l], 'income');
+      const lineCostFY = sumMonthsInFY_(lineCostByMonth, fy);
+      const lineIncFY = sumMonthsInFY_(lineIncByMonth, fy);
+
+      if (!budgetByKey[bkey]) {
+        budgetByKey[bkey] = { budget: 0, income: 0, status: src.status,
+          budgetFY: 0, incomeFY: 0, start: null, end: null };
+      }
+      const entry = budgetByKey[bkey];
+      entry.budget += l.cost;
+      entry.income += l.income;
+      entry.budgetFY += lineCostFY;
+      entry.incomeFY += lineIncFY;
+      if (l.start && (!entry.start || l.start < new Date(entry.start)))
+        entry.start = isoOrNull_(l.start);
+      if (l.end && (!entry.end || l.end > new Date(entry.end)))
+        entry.end = isoOrNull_(l.end);
     });
 
     sourceStatus[src.name] = src.status;
@@ -90,7 +107,7 @@ function buildSnapshot() {
       budgetIncome: fc.totalBudgetIncome });
   });
 
-  // Actuals from Xero, split by project AND funding-source tracking categories.
+  // Actuals from Xero, split by project, funding-source, and milestone.
   actualLines.forEach(l => {
     if (l.kind !== 'expense') return;
     if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
@@ -100,19 +117,24 @@ function buildSnapshot() {
     const isFY = (new Date(l.date) >= fy.start && new Date(l.date) <= fy.end);
     if (isFY) p.actualExpenseFY += l.amount;
 
-    const fs = l.fundingSource && !startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)
-      ? l.fundingSource : '(unassigned)';
-    const akey = l.project + '||' + fs;
-    actualByProjSrc[akey] = (actualByProjSrc[akey] || 0) + l.amount;
-    if (isFY) actualByProjSrcFY[akey] = (actualByProjSrcFY[akey] || 0) + l.amount;
+    const fs = l.fundingSource || '(unassigned)';
+    // Map actual to milestone via item code lookup
+    const code = itemCode_(l.item);
+    const mile = (code && itemToMilestone[fs + '||' + code]) || '(unassigned)';
+    const akey = l.project + '||' + fs + '||' + mile;
+    actualByKey[akey] = (actualByKey[akey] || 0) + l.amount;
+    if (isFY) actualByKeyFY[akey] = (actualByKeyFY[akey] || 0) + l.amount;
   });
 
-  const breakdownRows = buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, actualByProjSrcFY, sourceStatus);
+  const breakdownRows = buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStatus);
 
   // Quarterly tracking grid (baseline + actual per funding source / milestone /
   // quarter). Forecast is layered on at view time from the live Forecast sheet,
   // so GM edits show immediately without a full refresh.
   const tracking = buildTracking_(budgets, actualLines);
+
+  // Project planner timeline: milestone segments color-coded by funding status.
+  const timeline = buildTimeline_(budgets, actualLines, itemToMilestone, fy, now);
 
   // Per-project rollups (feed the summary cards / org totals).
   const rows = Object.keys(projects).map(name => {
@@ -150,42 +172,169 @@ function buildSnapshot() {
     fundingSources: fundingSources,
     breakdownRows: breakdownRows,
     tracking: tracking,
+    timeline: timeline,
     dataFlags: dataFlags
   };
 }
 
 /**
- * Finest-grain rows for the Overview breakdown: one per (project, funding source)
- * with budget (forecast spend), secured funding (income on secured sources only),
- * and actual spend. The UI groups these by any combination of project / funding
- * source / status. Built from the union of budget and actual keys so spend that
- * has no matching budget line still shows up.
+ * Finest-grain rows for the Overview breakdown: one per (project, funding source,
+ * milestone) with budget (forecast spend), secured funding (income on secured
+ * sources only), and actual spend. The UI groups these by any combination of
+ * project / funding source / status / milestone. Built from the union of budget
+ * and actual keys so spend that has no matching budget line still shows up.
  */
-function buildBreakdownRows_(budgetByProjSrc, actualByProjSrc, actualByProjSrcFY, sourceStatus) {
+function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStatus) {
   const keys = {};
-  Object.keys(budgetByProjSrc).forEach(k => (keys[k] = true));
-  Object.keys(actualByProjSrc).forEach(k => (keys[k] = true));
+  Object.keys(budgetByKey).forEach(k => (keys[k] = true));
+  Object.keys(actualByKey).forEach(k => (keys[k] = true));
 
   return Object.keys(keys).map(key => {
     const parts = key.split('||');
     const project = parts[0];
     const source = parts[1];
-    const b = budgetByProjSrc[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0, start: null, end: null };
+    const milestone = parts[2] || '(unassigned)';
+    const b = budgetByKey[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0, start: null, end: null };
     const status = (b.status || sourceStatus[source] || 'unknown');
     return {
       project: project,
       fundingSource: source,
+      milestone: milestone,
       status: status,
       budget: round_(b.budget || 0),
       secured: round_(status === 'secured' ? (b.income || 0) : 0),
-      actual: round_(actualByProjSrc[key] || 0),
+      actual: round_(actualByKey[key] || 0),
       budgetFY: round_(b.budgetFY || 0),
       securedFY: round_(status === 'secured' ? (b.incomeFY || 0) : 0),
-      actualFY: round_(actualByProjSrcFY[key] || 0),
+      actualFY: round_(actualByKeyFY[key] || 0),
       start: b.start || null,
       end: b.end || null
     };
   });
+}
+
+/**
+ * Build timeline data for the Project Planner view.
+ * For each (project, milestone) pair, produces an array of funding-source segments
+ * with date ranges and monthly cost distributions, plus actual spend to date.
+ * The UI renders these as a Gantt chart with green (secured), amber (proposed),
+ * and gray (unplanned gap) bars.
+ */
+function buildTimeline_(budgets, actualLines, itemToMilestone, fy, now) {
+  // Group budget lines by project+milestone, keeping each funding source as a segment.
+  const byProjMile = {}; // 'project||milestone' -> { segments: [], actualExpense: 0 }
+
+  budgets.forEach(src => {
+    src.lines.forEach(l => {
+      const pName = l.project || CONFIG.DEFAULT_PROJECT;
+      const mile = l.milestone || '(unassigned)';
+      const pmKey = pName + '||' + mile;
+      if (!byProjMile[pmKey]) byProjMile[pmKey] = { project: pName, milestone: mile, segments: [], actualExpense: 0 };
+
+      const monthlyCost = distributeByMonth_([l], 'cost');
+      byProjMile[pmKey].segments.push({
+        source: src.name,
+        status: src.status,
+        start: l.start ? DateMath.monthKey(l.start) : null,
+        end: l.end ? DateMath.monthKey(l.end) : null,
+        cost: round_(l.cost),
+        monthlyCost: roundMapValues_(monthlyCost)
+      });
+    });
+  });
+
+  // Sum actuals per (project, milestone) using itemToMilestone lookup.
+  actualLines.forEach(l => {
+    if (l.kind !== 'expense') return;
+    if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
+    const fs = l.fundingSource || '(unassigned)';
+    const code = itemCode_(l.item);
+    const mile = (code && itemToMilestone[fs + '||' + code]) || '(unassigned)';
+    const pmKey = l.project + '||' + mile;
+    if (byProjMile[pmKey]) {
+      byProjMile[pmKey].actualExpense += l.amount;
+    }
+  });
+
+  // For General project: add contribution entries from non-General sources.
+  // Each source's net (income − cost) per month represents what flows to General.
+  budgets.forEach(function (src) {
+    if (src.projectFolder === CONFIG.GENERAL_PROJECT) return;
+
+    var monthlyInc = distributeByMonth_(src.lines, 'income');
+    var monthlyCst = distributeByMonth_(src.lines, 'cost');
+
+    // Compute monthly net = income − cost
+    var allMks = {};
+    Object.keys(monthlyInc).forEach(function (mk) { allMks[mk] = true; });
+    Object.keys(monthlyCst).forEach(function (mk) { allMks[mk] = true; });
+    var monthlyNet = {};
+    var netTotal = 0;
+    Object.keys(allMks).forEach(function (mk) {
+      monthlyNet[mk] = (monthlyInc[mk] || 0) - (monthlyCst[mk] || 0);
+      netTotal += monthlyNet[mk];
+    });
+
+    var sortedMks = Object.keys(allMks).sort();
+    if (!sortedMks.length) return;
+
+    var pmKey = CONFIG.GENERAL_PROJECT + '||' + src.name + ' (contribution)';
+    byProjMile[pmKey] = {
+      project: CONFIG.GENERAL_PROJECT,
+      milestone: src.name + ' (contribution)',
+      segments: [{
+        source: src.name,
+        status: src.status,
+        start: sortedMks[0],
+        end: sortedMks[sortedMks.length - 1],
+        cost: round_(netTotal),
+        monthlyCost: roundMapValues_(monthlyNet)
+      }],
+      actualExpense: 0
+    };
+  });
+
+  // Compute actual net per source for contribution entries
+  var sourceActualNet = {};
+  actualLines.forEach(function (l) {
+    if (!l.fundingSource || startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)) return;
+    if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
+    var pmKey = CONFIG.GENERAL_PROJECT + '||' + l.fundingSource + ' (contribution)';
+    if (!byProjMile[pmKey]) return;
+    // Income adds to contribution, expense subtracts
+    if (l.kind === 'income') {
+      byProjMile[pmKey].actualExpense += l.amount;
+    } else {
+      byProjMile[pmKey].actualExpense -= l.amount;
+    }
+  });
+
+  // Horizon: FY start through today + 16 months.
+  const horizonStart = DateMath.monthKey(fy.start);
+  const hEnd = new Date(now.getFullYear(), now.getMonth() + 16, 1);
+  const horizonEnd = DateMath.monthKey(hEnd);
+
+  return Object.keys(byProjMile).map(key => {
+    const entry = byProjMile[key];
+    // Sort segments by start date.
+    entry.segments.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+    const totalBudget = entry.segments.reduce((t, s) => t + s.cost, 0);
+    return {
+      project: entry.project,
+      milestone: entry.milestone,
+      segments: entry.segments,
+      totalBudget: round_(totalBudget),
+      totalActual: round_(entry.actualExpense),
+      horizonStart: horizonStart,
+      horizonEnd: horizonEnd
+    };
+  }).sort((a, b) => a.project.localeCompare(b.project) || a.milestone.localeCompare(b.milestone));
+}
+
+function roundMapValues_(map) {
+  var out = {};
+  Object.keys(map).forEach(k => (out[k] = Math.round(map[k])));
+  return out;
 }
 
 /**
@@ -211,6 +360,9 @@ function buildTracking_(budgets, actualLines) {
   });
 
   return budgets.map(src => {
+    // Per-source forecast from the Forecast tab (may be empty if tab is missing).
+    const fc = src.forecast || { cost: {}, income: {}, comments: {} };
+
     // Group budget lines by milestone (item code).
     const byItem = {};
     src.lines.forEach(l => {
@@ -221,13 +373,25 @@ function buildTracking_(budgets, actualLines) {
 
     const milestones = Object.keys(byItem).map(code => {
       const key = src.name + '||' + code;
+      // Build per-quarter forecast maps for this item from the Forecast tab.
+      const costForecast = {};
+      const incomeForecast = {};
+      Object.keys(fc.cost).forEach(k => {
+        if (k.indexOf(code + '||') === 0) costForecast[k.split('||')[1]] = fc.cost[k];
+      });
+      Object.keys(fc.income).forEach(k => {
+        if (k.indexOf(code + '||') === 0) incomeForecast[k.split('||')[1]] = fc.income[k];
+      });
       return {
         item: code, milestone: byItem[code].milestone, source: src.name,
         project: dominantProject_(byItem[code].lines),
         baseline: roundMap_(bucketToQuarters(distributeByMonth_(byItem[code].lines, 'cost'))),
         actual: roundMap_(costActuals[key] || {}),
         incomeBaseline: roundMap_(bucketToQuarters(distributeByMonth_(byItem[code].lines, 'income'))),
-        incomeActual: roundMap_(incomeActuals[key] || {})
+        incomeActual: roundMap_(incomeActuals[key] || {}),
+        costForecast: roundMap_(costForecast),
+        incomeForecast: roundMap_(incomeForecast),
+        forecastComment: fc.comments[code] || ''
       };
     });
 
@@ -251,16 +415,18 @@ function buildTracking_(budgets, actualLines) {
         milestone: blank ? 'Unassigned (no product/service)'
           : (actualNames[key] || code) + ' (unbudgeted)',
         source: src.name, project: src.projectFolder, actualOnly: true,
-        baseline: {}, actual: actual, incomeBaseline: {}, incomeActual: incomeActual
+        baseline: {}, actual: actual, incomeBaseline: {}, incomeActual: incomeActual,
+        costForecast: {}, incomeForecast: {}, forecastComment: ''
       });
     });
 
     const quarterSet = {};
-    milestones.forEach(m => [m.baseline, m.actual, m.incomeBaseline, m.incomeActual]
+    milestones.forEach(m => [m.baseline, m.actual, m.incomeBaseline, m.incomeActual,
+      m.costForecast, m.incomeForecast]
       .forEach(map => Object.keys(map).forEach(q => (quarterSet[q] = true))));
     const quarters = Object.keys(quarterSet).sort((a, b) => quarterSortNum(a) - quarterSortNum(b));
     return { source: src.name, status: src.status, project: src.projectFolder,
-      quarters: quarters, milestones: milestones };
+      quarters: quarters, milestones: milestones, sheetUrl: src.sheetUrl || null };
   });
 }
 
