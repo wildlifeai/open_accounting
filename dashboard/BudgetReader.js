@@ -165,10 +165,6 @@ function parseBudgetFile_(ss, projectFolderName) {
       ' line(s) have no "' + CONFIG.BUDGET_COLUMNS.item +
       '", so they fall outside milestone tracking' });
   }
-  if (col.account === -1) {
-    issues.push({ check: 'A5', detail: 'no "' + CONFIG.BUDGET_COLUMNS.account +
-      '" column, so account-level reporting is impossible for this source' });
-  }
   if (!hasProjectColumn) {
     issues.push({ check: 'A4', detail: 'no "' + CONFIG.BUDGET_COLUMNS.project +
       '" column, so lines cannot be split across projects' });

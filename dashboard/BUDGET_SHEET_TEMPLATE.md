@@ -96,31 +96,29 @@ General budget should be deleted. They are a hand-maintained duplicate of a deri
 | `Project` | yes (column) | Per-line override. Blank means "use the `Project` metadata value". The column must exist even if every cell is blank. |
 | `Comments` | no | Not parsed. |
 
-Two columns are marked required-by-contract rather than required-by-parser: `*Account` and
-`Xero Inventory Item` are technically optional to `BudgetReader`, but account-level P&L and
-milestone tracking both break without them. Treat them as mandatory.
+## Budget at milestone level (decided 2026-08-11)
 
-Be aware `*Account` has **no consumer in the code today** — the only reads of `.account` anywhere
-are in a `WebApp.js` diagnostic that logs *actuals*, not budgets. It is captured for the quarterly
-account-level P&L the board needs, which is not built yet, and for reconciliation against Xero
-actuals, which do carry accounts. That is why health check A5 is `info` rather than a warning:
-nothing on screen is wrong without it.
+**One row per milestone. Do not itemise a budget by Xero account.** The template therefore omits
+three columns, and the parser is happy without them:
 
-## One milestone spans many accounts
+| Omitted | Why it is safe to leave out |
+|---|---|
+| `*Account` | Optional to the parser, and **nothing in the code reads a budget line's account** — the only `.account` reads anywhere are in a `WebApp.js` diagnostic over *actuals*. Health check A5 asked for it and has been retired. |
+| `Contribution` | **Derived as `Income − Cost`** when absent, which is what it should equal. Omitting it is safer than maintaining it, and makes B5 unreachable for that sheet. |
+| `Description` | Written by `BudgetReader` and read by **nothing**. Put the human label in `Milestone`, which is displayed. |
 
-A milestone is a chunk of work; an account is what kind of cost it is. They are separate dimensions
-and a budget row is their intersection, so **never create a milestone per account** — repeat the
-same `Xero Inventory Item` across as many rows as the milestone needs.
+The consequence to accept: budget-versus-actual is available at milestone level, not account level.
+Actuals still carry their account codes from Xero, so an actual-only P&L by account remains
+possible — you just cannot compare it against a budget that was never split that way.
 
-Rollup is keyed on `project||source||milestone` (`Aggregator.js:29`), and account appears in no key,
-so rows sharing an item code aggregate into one milestone with the accounts preserved underneath.
-This is already how the live sheets work: `WW_25_TOI_002` spans eight accounts as a single
-milestone, `WW_25_TOI_003` spans four.
+**`Milestone` is the column that must be filled.** It is the grouping key for the Overview
+breakdown (`project||source||milestone`, `Aggregator.js:76`), the row label in the tracking grid,
+and one of the filter dimensions. Leave it blank and every line in that source collapses into a
+single `(unassigned)` group. `Description`, by contrast, is decorative — so if you were going to
+fill only one of the two, fill `Milestone`.
 
-A data-scientist milestone is therefore three rows — the contractor on `Contractors (410)`,
-recruitment on `Advertising (400)`, software on `Subscriptions (485)` — all carrying the same item
-code. Splitting it into three milestones would triple the rows in the quarterly tracking grid for
-no gain.
+The minimum viable `Budget` tab is therefore: `Milestone`, `Xero Inventory Item`, `Start`, `End`,
+`Cost`, plus `Income` wherever the source has any, plus `Project` where a line belongs elsewhere.
 
 ## `Forecast` tab
 

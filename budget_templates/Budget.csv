@@ -10,12 +10,9 @@ Amount secured,0
 Decision date,15/Sep/26
 Owner,victor@wildlife.ai
 Last reviewed,11/Aug/26
-Notes,"Example only - replace every row below the header. One milestone spans as many accounts as it needs: repeat the same Xero Inventory Item on each row."
+Notes,"Example only - replace every row below the header. Budget at milestone level: one row per milestone, not one per Xero account."
 ,
-Description,Start,End,Cost,Income,Contribution,*Account,Milestone,Xero Inventory Item,Project,Comments
-Data scientist contractor 0.4 FTE,01/Oct/26,30/Sep/27,18000,30000,12000,Contractors (410),Delivery,WAI_27_EXAMPLE_001,,one milestone
-Recruitment for the data scientist,01/Oct/26,30/Nov/26,1200,2000,800,Advertising (400),Delivery,WAI_27_EXAMPLE_001,,same milestone
-Analysis software subscriptions,01/Oct/26,30/Sep/27,1800,3000,1200,Subscriptions (485),Delivery,WAI_27_EXAMPLE_001,,same milestone again
-Teacher workshops,01/Nov/26,31/Mar/27,6000,10000,4000,Contractors (410),Engagement,WAI_27_EXAMPLE_002,,4 workshops across the region
-General management 0.1 FTE,01/Oct/26,30/Sep/27,6000,10000,4000,Salaries (477),Core support,WAI_27_EXAMPLE_003,General,Project column sends this line to General
-Independent review 26/27,01/Jun/27,30/Jun/27,3000,5000,2000,Consulting & Accounting (412),Core support,WAI_27_EXAMPLE_003,General,shares the milestone above
+Milestone,Xero Inventory Item,Start,End,Cost,Income,Project,Comments
+Delivery,WAI_27_EXAMPLE_001,01/Oct/26,30/Sep/27,21000,35000,,data scientist 0.4 FTE plus recruitment and analysis software
+Engagement,WAI_27_EXAMPLE_002,01/Nov/26,31/Mar/27,6000,10000,,4 teacher workshops across the region
+Core support,WAI_27_EXAMPLE_003,01/Oct/26,30/Sep/27,9000,15000,General,general management and the independent review

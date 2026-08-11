@@ -64,7 +64,7 @@ their projects, the GM sees everything.
 | A2 | error | `Budget` tab missing `Start`, `End` or `Cost` | Whole file is invisible. Add the column. |
 | A3 | warning | Tabs beyond `Budget` / `Forecast` / `Submitted_budget` | Retire the extra tab; actuals live in Xero. |
 | A4 | warning | No `Project` column | Lines cannot be split across projects. |
-| A5 | info | No `*Account` column | Add it when you want account-level reporting. Info rather than warning: nothing in the code reads a budget line's account yet, so no displayed number is wrong without it. |
+| ~~A5~~ | — | ~~No `*Account` column~~ | **Retired 2026-08-11.** Budgets are set at milestone level, not per account, so its absence is expected. Nothing in the code read a budget line's account in any case. |
 | A6 | info | No `Submitted_budget` tab | No frozen record of what the funder was given. |
 | A7 | error | `Forecast` tab column header does not match `MMM-MMM YY Forecast` | That quarter's forecast is silently discarded. Name the column exactly, e.g. `Jul-Sep 26 Forecast`. |
 | A8 | warning | `Forecast` tab row whose column A is not a parseable `CODE - Name` | That row is skipped. Match the `Xero Inventory Item` from the `Budget` tab. |

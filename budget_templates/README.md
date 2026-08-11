@@ -51,37 +51,27 @@ line whose End precedes its Start is dropped entirely (health check B3).
 **Amounts** — plain numbers. `24000`, not `$24,000`. A currency symbol is tolerated but a comma
 inside an unquoted CSV field will split the row.
 
-**`Contribution`** must equal `Income − Cost` on every line, or health check B5 fires. In the
-example the three lines sum to $36,000 cost against $60,000 income, giving $24,000 of
-contribution — exactly the 40% the metadata declares.
+**`Contribution`** — the template deliberately has no such column. When it is absent the dashboard
+derives it as `Income − Cost`, which is what it should equal anyway, so leaving it out is safer than
+maintaining it. In the example the three rows total $36,000 cost against $60,000 income, giving
+$24,000 of derived contribution — exactly the 40% the metadata declares. Only add the column if a
+line's contribution genuinely differs from `Income − Cost`, and expect health check B5 to police it.
 
 **`Xero Inventory Item`** is the milestone code, formatted `SOURCE_YY_NAME_NNN` — e.g.
 `WAI_27_EXAMPLE_001`. Without it a line falls outside quarterly tracking (B4), and on a budget
 that is mostly salaries that means most of the money.
 
-### One milestone, many accounts
+### Budget at milestone level — one row per milestone
 
-**Never create a milestone per Xero account.** A milestone is a chunk of work; an account is what
-kind of cost it is. They are different dimensions, and a budget row is the intersection of the two,
-so a milestone spans as many accounts as it needs — just repeat the same `Xero Inventory Item` on
-each row.
+**Do not itemise the budget by Xero account.** One row per milestone, whatever mix of accounts the
+spend will eventually land on. The example's Delivery milestone is a single row covering a data
+scientist, their recruitment and the analysis software — three Xero accounts, one budget line.
 
-The example shows it: `WAI_27_EXAMPLE_001` is one milestone across three rows —
+Actuals arriving from Xero still carry their own account codes, so nothing is lost on the reporting
+side; you simply are not asked to predict the split in advance.
 
-| Description | `*Account` | `Xero Inventory Item` |
-|---|---|---|
-| Data scientist contractor 0.4 FTE | `Contractors (410)` | `WAI_27_EXAMPLE_001` |
-| Recruitment for the data scientist | `Advertising (400)` | `WAI_27_EXAMPLE_001` |
-| Analysis software subscriptions | `Subscriptions (485)` | `WAI_27_EXAMPLE_001` |
-
-The dashboard rolls up on project + funding source + milestone, so those three rows appear as one
-milestone with a combined budget, and the accounts stay available underneath for reconciliation
-against Xero. Your existing sheets already work this way: `WW_25_TOI_002` spans eight accounts —
-salaries, rent, insurance, accounting, advertising, contractors, general expenses and volunteer
-expenses — as a single milestone.
-
-Splitting one milestone into three because the money lands in three accounts would triple the rows
-in the tracking grid and make quarterly reporting unreadable, for no gain.
+That is why the template has no `*Account` column. It is optional to the parser, no code reads a
+budget line's account, and health check A5 (which used to ask for it) was retired.
 
 **`Project`** — leave blank to use the sheet's `Project` metadata value. Fill it only to send a
 line elsewhere, as the example's general-management line does to `General`.
