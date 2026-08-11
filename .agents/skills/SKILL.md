@@ -379,12 +379,17 @@ attribution must move funders mid-quarter. That transition is the first real tes
 Verified against the deployed code on 2026-08-11. Do not "discover" these again; do not assume
 they are fixed.
 
-* **`EXCLUDED_ACCOUNTS` is dead configuration.** Declared in `dashboard/Config.js`, read by zero
-  executable lines. Same for `OVERHEAD_ACCOUNT`, `REVENUE_ACCOUNTS`, `DEFERRED_ACCOUNT`.
-  `normaliseLine_` populates `account` on every line and nothing downstream reads it. The de facto
-  filter on actuals is "does this line carry a `Projects` value" — a data-entry accident, not a
-  control. Wire it up as its own isolated change, match on account **code** not label (labels come
-  from live Xero names and a rename would silently un-exclude), then diff the totals.
+* **`EXCLUDED_ACCOUNTS` — fixed 2026-08-11, but the totals move on first deploy.** It was declared
+  in `dashboard/Config.js` and read by zero executable lines, so the de facto filter on actuals was
+  "does this line carry a `Projects` value" — a data-entry accident rather than a control, and the
+  Wages Payable and PAYE Payable legs of a payroll settlement counted as spend whenever they
+  happened to be tagged. `isExcludedAccount_` now filters inside `fetchXeroActuals`, in one place so
+  every fetcher inherits it, matching on account **code** rather than label so a Xero rename cannot
+  silently un-exclude. `lastExclusionSummary()` reports what was dropped. **Expect published spend
+  figures to fall when this first deploys** — that is the miscounting being removed, not a
+  regression, so capture the before/after.
+* **`OVERHEAD_ACCOUNT`, `REVENUE_ACCOUNTS` and `DEFERRED_ACCOUNT` are still dead configuration** —
+  declared, never read.
 * **Payroll manual journals are not fetched** (§4).
 * **The invoice fetcher counts DRAFT and SUBMITTED invoices** as actuals — it excludes only
   DELETED and VOIDED.

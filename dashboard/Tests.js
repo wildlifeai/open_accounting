@@ -67,6 +67,15 @@ function runTests() {
   check('metadata stops at the header row', meta['description'] === undefined);
   check('isoDate_ zero-pads', isoDate_(new Date(2026, 5, 3)) === '2026-06-03');
 
+  // Balance-sheet exclusions match on account code, not label, so renaming an
+  // account in Xero cannot silently un-exclude it.
+  check('excludes Wages Payable', isExcludedAccount_('Wages Payable - Payroll (814)'));
+  check('excludes PAYE Payable', isExcludedAccount_('PAYE Payable (825)'));
+  check('excludes after a Xero rename', isExcludedAccount_('Renamed In Xero (814)'));
+  check('keeps Salaries', !isExcludedAccount_('Salaries (477)'));
+  check('keeps an untagged/blank account', !isExcludedAccount_(''));
+  check('keeps an unknown code', !isExcludedAccount_('Something New (999)'));
+
   // Forecast merge with FY columns: aggregate 'Up to last FY' + this FY quarters.
   // Forecast overrides live on the milestone itself, read from each funding
   // source's own Forecast tab by BudgetReader.parseForecastTab_.
