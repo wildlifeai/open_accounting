@@ -4,15 +4,16 @@ Every funding source has one Google Sheet in the Budgets Drive, named **exactly*
 *Funding source* tracking value (e.g. `WW_25_TOI`), living in its project's `secured/` or
 `proposed/` folder.
 
-**At most two tabs:**
+**At most three tabs:**
 
 | Tab | Role |
 |---|---|
 | `Budget` | the live baseline the cockpit reads. Change only for a genuine re-budget. |
+| `Forecast` | per-quarter overrides, where you know something the budget does not. Optional. |
 | `Submitted_budget` | frozen record of what the funder was actually given. Never edited. |
 
-Nothing else. Actuals come live from Xero; forecasts live in the central Cockpit Forecast sheet.
-A per-sheet copy of either is a second version of the truth and will drift.
+Nothing else. Actuals come live from Xero, so a per-sheet copy of them is a second version of the
+truth and will drift.
 
 ---
 
@@ -93,6 +94,46 @@ General budget should be deleted. They are a hand-maintained duplicate of a deri
 Two columns are marked required-by-contract rather than required-by-parser: `*Account` and
 `Xero Inventory Item` are technically optional to `BudgetReader`, but account-level P&L and
 milestone tracking both break without them. Treat them as mandatory.
+
+## `Forecast` tab
+
+Optional, and only worth creating when you need to override the budget. **A quarter with no entry
+here falls back to the budget baseline**, so an empty or absent `Forecast` tab is a valid state —
+it means "the budget is still our best estimate". Record a forecast when you know something the
+budget does not: a delayed hire, a grant ending early, a re-profiled milestone.
+
+Layout, as parsed by `BudgetReader.parseForecastTab_`:
+
+```
+A                              | B                     | C                     | D
+-------------------------------|-----------------------|-----------------------|----------
+Revenue                        | Jul-Sep 26 Forecast   | Oct-Dec 26 Forecast   | Comments
+WW_25_TOI_006 - Grant income   | 35000                 | 35000                 |
+                               |                       |                       |
+Expenses                       | Jul-Sep 26 Forecast   | Oct-Dec 26 Forecast   | Comments
+WW_25_TOI_002 - General mgmt   | 7108                  | 0                     | GM role vacant from Oct
+WW_25_TOI_003 - Admin & Comms  | 2390                  | 0                     | comms advisor departed
+                               |                       |                       |
+Funding Source Details         |                       |                       |
+```
+
+Rules that are easy to get wrong:
+
+- Section headers in column A must read exactly `Revenue` or `Expenses`. Rows before the first
+  section header are ignored.
+- **Quarter column headers must match `MMM-MMM YY Forecast` exactly** — e.g. `Jul-Sep 26 Forecast`.
+  Anything else is silently ignored, so a typo in one heading quietly discards that quarter's
+  forecast with no error. Health check **A7** exists for this.
+- Column A rows under a section must be `CODE - Name`, where `CODE` is the `Xero Inventory Item`
+  from the `Budget` tab. A row whose code cannot be parsed is skipped.
+- Blank rows and rows whose column A starts with `Total` are skipped.
+- Parsing **stops entirely** at a column-A value of `Funding Source Details`. Anything below that
+  line is invisible, which makes it a useful place for working notes.
+- Each section can carry its own quarter columns; they are re-read per section header.
+- A `Comments` column (header exactly `Comments`) attaches one free-text note per milestone,
+  surfaced in the tracking grid. Use it to say *why* a forecast differs from the budget.
+
+Forecast values are per quarter, not per month, and are absolute amounts rather than adjustments.
 
 ## Common failures
 

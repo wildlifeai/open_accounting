@@ -234,17 +234,34 @@ Rules that follow from this:
 
 # 3. Budget Sheet Contract
 
-**A funding-source spreadsheet has at most two tabs (rule set 2026-08-11):**
+**A funding-source spreadsheet has at most three tabs (rule set 2026-08-11):**
 
 | Tab | Role |
 |---|---|
 | `Budget` | the live baseline the cockpit reads — the approved plan, changed only for a genuine re-budget |
+| `Forecast` | per-quarter overrides where you know something the budget does not |
 | `Submitted_budget` | frozen as-submitted record of what the funder was actually given |
 
 Everything else goes: `Budget, Actual, Forecast Tracking` grids, pasted Xero transaction exports,
 milestone summaries, forecast breakdowns, income summaries, funding-tracking header blocks. Actuals
-come live from Xero and forecasts live in the central Cockpit Forecast sheet; a per-sheet copy is a
-second version of the truth.
+come live from Xero; a per-sheet copy of them is a second version of the truth.
+
+**Forecasts are per-sheet, not central.** An earlier design kept them in one central Cockpit
+Forecast sheet, and `BUDGET_PROCEDURES_ADDENDUM.md` still describes it that way — that is stale.
+`ForecastStore.js` now states plainly that "legacy forecast storage has been removed"; the central
+sheet is **Cockpit Settings**, holding only the Permissions tab, and forecasts are read from each
+funding source's own `Forecast` tab by `BudgetReader.parseForecastTab_`.
+
+**A missing forecast falls back to the budget baseline.** `TrackingBuilder` treats a quarter with
+no `Forecast` entry as the baseline, not as zero, so an unmaintained `Forecast` tab does not make a
+source appear certain to underspend. That fallback is the difference between a forecast being an
+exception you record and mandatory quarterly data entry across ~30 sheets; it was the original
+tested behaviour, was lost in the per-sheet rewrite, and was restored on 2026-08-11 with a
+regression test in `Tests.js`. Do not "simplify" it back to `0`.
+
+Note the **current** quarter deliberately shows actual-to-date rather than the forecast, so mid-
+quarter it understates that column, and with it annual Expected. Whether it should instead be
+actual plus the remainder of the forecast is an open question.
 
 Three consequences to handle rather than discover:
 

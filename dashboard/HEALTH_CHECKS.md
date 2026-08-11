@@ -62,10 +62,16 @@ their projects, the GM sees everything.
 |---|---|---|---|
 | A1 | error | Funding-source file has no `Budget` tab | Whole file is invisible. Add or rename the tab. |
 | A2 | error | `Budget` tab missing `Start`, `End` or `Cost` | Whole file is invisible. Add the column. |
-| A3 | warning | Tabs beyond `Budget` / `Submitted_budget` | Retire the extra tab; actuals and forecasts live elsewhere. |
+| A3 | warning | Tabs beyond `Budget` / `Forecast` / `Submitted_budget` | Retire the extra tab; actuals live in Xero. |
 | A4 | warning | No `Project` column | Lines cannot be split across projects. |
 | A5 | warning | No `*Account` column | Account-level P&L impossible for this source. |
 | A6 | info | No `Submitted_budget` tab | No frozen record of what the funder was given. |
+| A7 | error | `Forecast` tab column header does not match `MMM-MMM YY Forecast` | That quarter's forecast is silently discarded. Name the column exactly, e.g. `Jul-Sep 26 Forecast`. |
+| A8 | warning | `Forecast` tab row whose column A is not a parseable `CODE - Name` | That row is skipped. Match the `Xero Inventory Item` from the `Budget` tab. |
+| A9 | info | `Forecast` entry for an item code absent from the `Budget` tab | Forecasting a milestone that no longer exists. |
+
+A missing or empty `Forecast` tab is **not** a finding — a quarter with no override falls back to
+the budget baseline, so an absent tab legitimately means "the budget is still our best estimate".
 
 ### B. Data quality
 
