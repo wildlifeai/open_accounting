@@ -17,7 +17,13 @@
  */
 
 /**
- * @return {Array<{name, status, projectFolder, lines, hasProjectColumn}>}
+ * Everything this reader discards is reported rather than silently dropped: a
+ * malformed line used to vanish behind a Logger.log nobody reads. Each entry
+ * carries `issues: [{ check, row?, detail }]` where `check` is a health-check id
+ * from dashboard/HEALTH_CHECKS.md.
+ *
+ * @return {Array<{name, status, projectFolder, lines, hasProjectColumn, metadata,
+ *                 tabs, forecast, sheetUrl, issues}>}
  *   one entry per funding-source spreadsheet found.
  */
 function readAllBudgets() {
@@ -44,24 +50,55 @@ function readStatusFolder_(projectFolder, subName, status, out) {
   while (files.hasNext()) {
     const file = files.next();
     if (startsWithArchive_(file.getName())) continue;
+
+    const entry = { name: file.getName(), status: status,
+      projectFolder: projectFolder.getName(), lines: [], hasProjectColumn: false,
+      metadata: {}, tabs: [], sheetUrl: '',
+      forecast: { cost: {}, income: {}, comments: {} }, issues: [] };
     try {
-      const parsed = parseBudgetFile_(file, projectFolder.getName());
-      const forecast = parseForecastTab_(file);
-      out.push({ name: file.getName(), status: status,
-        projectFolder: projectFolder.getName(), lines: parsed.lines,
-        hasProjectColumn: parsed.hasProjectColumn,
-        forecast: forecast.data, sheetUrl: forecast.sheetUrl });
+      // Open once and share. This file used to be opened twice - once for the
+      // Budget tab, once for Forecast - and the crawl already approaches the
+      // Apps Script 6-minute limit.
+      const ss = SpreadsheetApp.openById(file.getId());
+      entry.sheetUrl = ss.getUrl();
+      entry.tabs = ss.getSheets().map(s => s.getName());
+
+      const parsed = parseBudgetFile_(ss, projectFolder.getName());
+      entry.lines = parsed.lines;
+      entry.hasProjectColumn = parsed.hasProjectColumn;
+      entry.metadata = parsed.metadata;
+      entry.issues = entry.issues.concat(parsed.issues);
+
+      const forecast = parseForecastTab_(ss);
+      entry.forecast = forecast.data;
+      entry.issues = entry.issues.concat(forecast.issues);
     } catch (e) {
+      // A file that will not parse is invisible on the dashboard. Report it as a
+      // finding instead of only logging, and still push the entry so the source
+      // appears in Health rather than disappearing without trace.
+      entry.issues.push({ check: 'A1', detail: e.message });
       Logger.log('Skipped ' + file.getName() + ': ' + e.message);
     }
+    out.push(entry);
   }
 }
 
-function parseBudgetFile_(file, projectFolderName) {
-  const sheet = SpreadsheetApp.openById(file.getId()).getSheetByName(CONFIG.BUDGET_TAB);
+function parseBudgetFile_(ss, projectFolderName) {
+  const sheet = ss.getSheetByName(CONFIG.BUDGET_TAB);
   if (!sheet) throw new Error('no "' + CONFIG.BUDGET_TAB + '" tab');
   const data = sheet.getDataRange().getValues();
-  const header = data[0];
+
+  // The header row is located, not assumed: a `key | value` metadata block may sit
+  // above it (see BUDGET_SHEET_TEMPLATE.md).
+  const headerRow = findHeaderRow_(data);
+  if (headerRow === -1) {
+    throw new Error('no column header row found in the first ' +
+      (CONFIG.HEADER_SCAN_ROWS || 40) + ' rows (needs both "' +
+      CONFIG.BUDGET_COLUMNS.start + '" and "' + CONFIG.BUDGET_COLUMNS.cost + '")');
+  }
+  const metadata = readMetadataBlock_(data, headerRow);
+
+  const header = data[headerRow];
   const col = {};
   Object.keys(CONFIG.BUDGET_COLUMNS).forEach(k => {
     const expected = clean_(CONFIG.BUDGET_COLUMNS[k]).toLowerCase();
@@ -73,20 +110,39 @@ function parseBudgetFile_(file, projectFolderName) {
   const hasProjectColumn = col.project !== -1;
 
   const lines = [];
-  for (let i = 1; i < data.length; i++) {
+  const issues = [];
+  let zeroRows = 0, missingItem = 0;
+
+  for (let i = headerRow + 1; i < data.length; i++) {
     const row = data[i];
+    const rowNo = i + 1; // 1-based, as it appears in Sheets
     const cost = parseAmount_(col.cost !== -1 ? row[col.cost] : 0);
     const income = parseAmount_(col.income !== -1 ? row[col.income] : 0);
-    if (cost === 0 && income === 0) continue; // skip blank/summary rows
+    if (cost === 0 && income === 0) { zeroRows++; continue; } // blank/summary row
+
     const start = parseSheetDate_(row[col.start]);
     const end = parseSheetDate_(row[col.end]);
-    if (!start || !end) continue;
+    if (!start || !end) {
+      issues.push({ check: 'B2', row: rowNo, detail: 'unparseable date (Start "' +
+        clean_(row[col.start]) + '", End "' + clean_(row[col.end]) + '") - line ignored' });
+      continue;
+    }
+    if (end < start) {
+      // Day-weighting a reversed range yields nonsense. Two-digit years are the
+      // usual cause: "30/Jun/01" parses as the year 2001.
+      issues.push({ check: 'B3', row: rowNo, detail: 'End ' + isoDate_(end) +
+        ' precedes Start ' + isoDate_(start) + ' - line ignored' });
+      continue;
+    }
 
     // Project attribution: a line's `Project` value wins when set; otherwise
     // (no column, or blank cell) the line belongs to its parent project folder.
     const project = hasProjectColumn && row[col.project]
       ? clean_(row[col.project])
       : (projectFolderName || CONFIG.DEFAULT_PROJECT);
+
+    const item = col.item !== -1 ? clean_(row[col.item]) : '';
+    if (!item) missingItem++;
 
     lines.push({
       description: col.description !== -1 ? clean_(row[col.description]) : '',
@@ -95,11 +151,66 @@ function parseBudgetFile_(file, projectFolderName) {
       contribution: col.contribution !== -1 ? parseAmount_(row[col.contribution]) : (income - cost),
       account: col.account !== -1 ? clean_(row[col.account]) : '',
       milestone: col.milestone !== -1 ? clean_(row[col.milestone]) : '',
-      item: col.item !== -1 ? clean_(row[col.item]) : '',
+      item: item,
       project: project
     });
   }
-  return { lines: lines, hasProjectColumn: hasProjectColumn };
+
+  if (zeroRows) {
+    issues.push({ check: 'B1', detail: zeroRows +
+      ' line(s) skipped because Cost and Income are both 0' });
+  }
+  if (missingItem) {
+    issues.push({ check: 'B4', detail: missingItem +
+      ' line(s) have no "' + CONFIG.BUDGET_COLUMNS.item +
+      '", so they fall outside milestone tracking' });
+  }
+  if (col.account === -1) {
+    issues.push({ check: 'A5', detail: 'no "' + CONFIG.BUDGET_COLUMNS.account +
+      '" column, so account-level reporting is impossible for this source' });
+  }
+  if (!hasProjectColumn) {
+    issues.push({ check: 'A4', detail: 'no "' + CONFIG.BUDGET_COLUMNS.project +
+      '" column, so lines cannot be split across projects' });
+  }
+
+  return { lines: lines, hasProjectColumn: hasProjectColumn,
+    metadata: metadata, issues: issues };
+}
+
+/**
+ * Locate the column header row: the first row (within HEADER_SCAN_ROWS) carrying
+ * both the Start and Cost header names. Requiring both means a metadata row such
+ * as `Funding start | 10/Aug/25` cannot be mistaken for it.
+ */
+function findHeaderRow_(data) {
+  const startName = clean_(CONFIG.BUDGET_COLUMNS.start).toLowerCase();
+  const costName = clean_(CONFIG.BUDGET_COLUMNS.cost).toLowerCase();
+  const limit = Math.min(data.length, CONFIG.HEADER_SCAN_ROWS || 40);
+  for (let i = 0; i < limit; i++) {
+    const row = (data[i] || []).map(h => clean_(h).toLowerCase());
+    if (row.indexOf(startName) !== -1 && row.indexOf(costName) !== -1) return i;
+  }
+  return -1;
+}
+
+/** Read the `key | value` block above the header row into a lower-cased map. */
+function readMetadataBlock_(data, headerRow) {
+  const meta = {};
+  for (let i = 0; i < headerRow; i++) {
+    const row = data[i] || [];
+    const key = clean_(row[0]);
+    if (!key) continue;
+    const raw = row.length > 1 ? row[1] : '';
+    meta[key.toLowerCase()] = (raw instanceof Date) ? raw : clean_(raw);
+  }
+  return meta;
+}
+
+/** yyyy-MM-dd without depending on Utilities/Session, so it stays unit-testable. */
+function isoDate_(d) {
+  const p = n => (n < 10 ? '0' : '') + n;
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
 
 /** Parse "$5,600" / 5600 / "" into a Number (0 when blank/unparseable). */
@@ -144,11 +255,14 @@ function parseSheetDate_(value) {
  * The Forecast tab has Revenue and Expenses sections with item codes in column A
  * and quarter forecasts in subsequent columns. Stops at "Funding Source Details".
  */
-function parseForecastTab_(file) {
-  const ss = SpreadsheetApp.openById(file.getId());
+function parseForecastTab_(ss) {
   const sheetUrl = ss.getUrl();
-  const sheet = ss.getSheetByName('Forecast');
-  const empty = { data: { cost: {}, income: {}, comments: {} }, sheetUrl: sheetUrl };
+  const sheet = ss.getSheetByName(CONFIG.FORECAST_TAB);
+  const issues = [];
+  const empty = { data: { cost: {}, income: {}, comments: {} },
+    sheetUrl: sheetUrl, issues: issues };
+  // An absent or empty Forecast tab is a valid state, not a finding: a quarter
+  // with no override falls back to the budget baseline.
   if (!sheet) return empty;
 
   const data = sheet.getDataRange().getValues();
@@ -172,9 +286,15 @@ function parseForecastTab_(file) {
       commentCol = -1;
       for (var j = 1; j < data[i].length; j++) {
         var header = clean_(String(data[i][j] || ''));
+        if (!header) continue;
         if (header.toLowerCase() === 'comments') { commentCol = j; continue; }
         var ql = parseQuarterHeader_(header);
-        if (ql) quarterCols.push({ col: j, label: ql });
+        if (ql) { quarterCols.push({ col: j, label: ql }); continue; }
+        // A header that does not match "MMM-MMM YY Forecast" is ignored, which
+        // silently discards a whole quarter of forecast. Say so.
+        issues.push({ check: 'A7', row: i + 1, detail: 'Forecast column header "' +
+          header + '" does not match "MMM-MMM YY Forecast" (e.g. "Jul-Sep 26 ' +
+          'Forecast") - that column is ignored' });
       }
       continue;
     }
@@ -185,7 +305,11 @@ function parseForecastTab_(file) {
 
     // Extract item code from "CODE - Name" format
     var code = itemCode_(cellA);
-    if (!code) continue;
+    if (!code) {
+      issues.push({ check: 'A8', row: i + 1, detail: 'Forecast row "' + cellA +
+        '" is not a "CODE - Name" milestone, so it is ignored' });
+      continue;
+    }
 
     var bucket = (section === 'revenue') ? result.income : result.cost;
     quarterCols.forEach(function (qc) {
@@ -202,7 +326,7 @@ function parseForecastTab_(file) {
     }
   }
 
-  return { data: result, sheetUrl: sheetUrl };
+  return { data: result, sheetUrl: sheetUrl, issues: issues };
 }
 
 /**

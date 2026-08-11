@@ -21,8 +21,17 @@ const CONFIG = {
   ARCHIVE_PREFIX: 'Z_ARCH_', // funding sources / projects with this prefix are ignored
 
   // ---- Budget sheet structure ---------------------------------------------
+  // A funding-source spreadsheet carries at most these three tabs. Anything else
+  // is a second version of the truth: actuals come live from Xero, and forecast
+  // overrides belong in the `Forecast` tab. Health check A3 flags extras.
   BUDGET_TAB: 'Budget',
-  TRACKING_TAB: 'Budget, Actual, Forecast Tracking',
+  FORECAST_TAB: 'Forecast',
+  SUBMITTED_TAB: 'Submitted_budget',
+  // The `Budget` tab may carry a `key | value` metadata block above the column
+  // header row (owner, status, funding dates, contribution policy - see
+  // BUDGET_SHEET_TEMPLATE.md). The header row is therefore located, not assumed:
+  // we scan this many rows for one containing both `Start` and `Cost`.
+  HEADER_SCAN_ROWS: 40,
   // Columns on the funding-source `Budget` tab (keyed on milestone, not accounts).
   // Two real variants exist and both are supported:
   //   Description, Start, End, Cost, Income, Contribution, Comments, Milestone,

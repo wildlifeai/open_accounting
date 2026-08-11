@@ -45,6 +45,28 @@ function runTests() {
   check('bucketToQuarters next FY Q1', qb['26/27 Q1'] === 30);
   check('quarterSortNum order', quarterSortNum('26/27 Q1') > quarterSortNum('25/26 Q4'));
 
+  // Budget tab: the column header row is located, not assumed, so a key|value
+  // metadata block can sit above it (see BUDGET_SHEET_TEMPLATE.md).
+  var sheetRows = [
+    ['Funding source', 'WW_25_TOI'],
+    ['Status', 'secured'],
+    ['Contribution policy', 'percent_of_income:40'],
+    [],
+    ['Description', 'Start', 'End', 'Cost', 'Income', 'Milestone'],
+    ['GM 0.2 FTE', '03/Nov/25', '02/Aug/26', 23101, 0, 'General management']
+  ];
+  check('header row located below metadata block', findHeaderRow_(sheetRows) === 4);
+  check('header row is 0 when there is no metadata block',
+    findHeaderRow_([['Description', 'Start', 'End', 'Cost']]) === 0);
+  check('no header row returns -1', findHeaderRow_([['Notes', 'x'], ['more', 'y']]) === -1);
+
+  var meta = readMetadataBlock_(sheetRows, 4);
+  check('metadata keys are lower-cased', meta['funding source'] === 'WW_25_TOI');
+  check('metadata carries contribution policy',
+    meta['contribution policy'] === 'percent_of_income:40');
+  check('metadata stops at the header row', meta['description'] === undefined);
+  check('isoDate_ zero-pads', isoDate_(new Date(2026, 5, 3)) === '2026-06-03');
+
   // Forecast merge with FY columns: aggregate 'Up to last FY' + this FY quarters.
   // Forecast overrides live on the milestone itself, read from each funding
   // source's own Forecast tab by BudgetReader.parseForecastTab_.
