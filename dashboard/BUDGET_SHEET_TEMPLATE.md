@@ -1,5 +1,10 @@
 # Funding-source budget sheet — template and contract
 
+> **Creating or updating a sheet?** Start from the importable CSVs in
+> [`budget_templates/`](../budget_templates/) rather than transcribing the tables below —
+> `Budget.csv` and `Forecast.csv` import straight into Google Sheets and land with the correct tab
+> names. This document is the reference for what every field means and how each one fails.
+
 Every funding source has one Google Sheet in the Budgets Drive, named **exactly** as its Xero
 *Funding source* tracking value (e.g. `WW_25_TOI`), living in its project's `secured/` or
 `proposed/` folder.

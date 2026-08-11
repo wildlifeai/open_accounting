@@ -1,0 +1,18 @@
+Funding source,WAI_27_EXAMPLE
+Project,Wild About AI
+Funder,Example Foundation
+Status,proposed
+Funding start,01/Oct/26
+Funding end,30/Sep/27
+Contribution policy,percent_of_income:40
+Amount requested,60000
+Amount secured,0
+Decision date,15/Sep/26
+Owner,victor@wildlife.ai
+Last reviewed,11/Aug/26
+Notes,"Example only. Replace every line below the header row."
+
+Description,Start,End,Cost,Income,Contribution,*Account,Milestone,Xero Inventory Item,Project,Comments
+Programme lead 0.4 FTE,01/Oct/26,30/Sep/27,24000,40000,16000,Salaries (477),Delivery,WAI_27_EXAMPLE_001,,0.4 of a 60k salary
+Teacher workshops,01/Nov/26,31/Mar/27,6000,10000,4000,Contractors (410),Engagement,WAI_27_EXAMPLE_002,,4 workshops across term 1
+General management 0.1 FTE,01/Oct/26,30/Sep/27,6000,10000,4000,Salaries (477),Core support,WAI_27_EXAMPLE_003,General,booked to General via the Project column
