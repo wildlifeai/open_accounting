@@ -132,15 +132,17 @@ does that properly, so the justification is gone.
 
 ## Line Ending Invariant
 
-**There is no `.gitattributes` in this repo.** clasp writes LF; a Windows checkout is CRLF. So
-after `clasp pull`, files can appear wholly modified with no content change.
+**`.gitattributes` sets `* text=auto eol=lf`,** so LF holds in both the stored blob and the working
+tree. It was added on 2026-08-11; before that, clasp wrote LF while a Windows checkout was CRLF, so
+`clasp pull` made whole files appear modified with no content change.
 
 * Use `git diff --ignore-cr-at-eol` to see real changes, and
   `git diff --ignore-cr-at-eol --numstat -- <file>` to confirm a file is line-endings-only.
 * Restore line-endings-only files rather than committing them: `git checkout -- <file>`.
 * A diff where insertions ≈ deletions ≈ the file's line count is an artifact, not an edit.
-* Adding `* text=auto eol=lf` plus `git add --renormalize .` would end this class of noise. It has
-  not been done; propose it rather than assuming it.
+* After changing `.gitattributes`, renormalise with `git add --renormalize .`.
+* Never commit a real grant amount, rate, funder term or invoice identifier — **this repository is
+  public**. Describe the shape of a problem and invent the numbers, including in test fixtures.
 
 ---
 
@@ -433,6 +435,10 @@ they are fixed.
 
 # 6. Overhead and Double-Funding Rules
 
+> **This is a public repository.** Never paste real grant amounts, hourly rates, funder terms or
+> invoice identifiers into tracked files, including examples and test fixtures. Describe the shape
+> of a problem and invent the numbers.
+
 ## Overhead / General contribution
 
 Projects contribute a share of income to `General` — Spyfish 40% by default, `WW_26_SALES` 40%,
@@ -453,13 +459,13 @@ negative-cost lines. Until then, treat any overhead figure as hand-maintained an
 The same cost must not be charged to two funding sources for the same period. Signals found on
 2026-08-11 that need resolving, not repeating:
 
-* `WW_25_TOI_002` "General management" is budgeted $37,310 inside the Wildlife Watcher Toi grant,
-  and 100% of its salary actuals are tracked to `Projects: General` — while General secured also
-  budgets General management.
+* `WW_25_TOI_002` "General management" is budgeted inside the Wildlife Watcher Toi grant, and
+  100% of its salary actuals are tracked to `Projects: General` — while General secured *also*
+  budgets General management. (Amounts deliberately omitted: public repository.)
 * General management 0.2 FTE appears in two sheets with a one-month date overlap; WW Product
   Management overlaps ~3 months at a combined 1.0 FTE; a third sheet budgets the same GM at
   1.0 FTE.
-* One invoice (`1a0607dd-…`, $52.09) appears under both `WW_25_TOI` and `WW_25_STOUT`.
+* At least one invoice appears under two funding sources at once.
 * Handoffs between funders are recorded as free text ("covered by TOI funding"), not as structure.
 
 Rule: when preparing any funding application, check whether the cost is already funded elsewhere,

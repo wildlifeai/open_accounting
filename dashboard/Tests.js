@@ -53,7 +53,7 @@ function runTests() {
     ['Contribution policy', 'percent_of_income:40'],
     [],
     ['Description', 'Start', 'End', 'Cost', 'Income', 'Milestone'],
-    ['GM 0.2 FTE', '03/Nov/25', '02/Aug/26', 23101, 0, 'General management']
+    ['Delivery lead', '03/Nov/25', '02/Aug/26', 20000, 0, 'Delivery']
   ];
   check('header row located below metadata block', findHeaderRow_(sheetRows) === 4);
   check('header row is 0 when there is no metadata block',

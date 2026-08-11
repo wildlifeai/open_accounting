@@ -42,25 +42,27 @@ the parser locates the header row either way.
 ```
 A                        | B                      | C ...
 -------------------------|------------------------|--------
-Funding source           | WW_25_TOI              |
+Funding source           | XXX_27_EXAMPLE         |
 Project                  | Wildlife Watcher       |
-Funder                   | Toi Foundation         |
+Funder                   | Example Funder Trust   |
 Status                   | secured                |
-Funding start            | 10/Aug/25              |
-Funding end              | 10/Dec/26              |
+Funding start            | 01/Jul/26              |
+Funding end              | 30/Jun/27              |
 Contribution policy      | percent_of_income:40   |
-Amount requested         | 143436                 |
-Amount secured           | 143436                 |
-Decision date            | 2025-08-01             |
-Owner                    | victor@wildlife.ai     |
-Last reviewed            | 2026-08-11             |
-Notes                    | Core roles to Dec 26   |
+Amount requested         | 50000                  |
+Amount secured           | 50000                  |
+Decision date            |                        |
+Owner                    | someone@wildlife.ai    |
+Last reviewed            | 01/Jul/26              |
+Notes                    | Illustrative only      |
                          |                        |
-Description | Start | End | Cost | Income | Contribution | *Account | Milestone | Xero Inventory Item | Project | Comments
-General management 0.2 FTE | 03/Nov/25 | 02/Aug/26 | 23101 | 0 | 0 | Salaries (477) | General management | WW_25_TOI_002 | General | 2.3k monthly for GM
-Product management 0.4 FTE | 05/Jan/26 | 10/Jan/27 | 53571 | 0 | 0 | Salaries (477) | Product management | WW_25_TOI_003 |  |
-Toi grant income           | 10/Aug/25 | 10/Dec/26 | 0 | 143436 | 57374 | Project Contract Income (181) | Grant income | WW_25_TOI_006 |  | 40% contributes to General
+Description | Start | End | Cost | Income | Contribution | Milestone | Xero Inventory Item | Project | Comments
+Delivery lead 0.2 FTE | 01/Jul/26 | 30/Jun/27 | 18000 | 30000 | 12000 | Delivery | XXX_27_EXAMPLE_001 | | invented figures
+Product management    | 01/Jul/26 | 30/Jun/27 | 12000 | 20000 | 8000  | Product | XXX_27_EXAMPLE_002 | General | invented figures
 ```
+
+All numbers in this document are invented. **This is a public repository — never paste real grant
+amounts, rates, funder terms or invoice identifiers into it.**
 
 ## Metadata fields
 
