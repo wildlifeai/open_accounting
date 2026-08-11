@@ -29,9 +29,12 @@ const HEALTH_CATALOGUE = {
   A4: { severity: 'warning', category: 'Sheet structure',
     title: 'No Project column',
     action: 'Add it so lines can be attributed across projects.' },
-  A5: { severity: 'warning', category: 'Sheet structure',
+  // info, not warning: nothing in the code reads a budget line's account yet, so
+  // no displayed number is wrong without it. It is needed for the account-level
+  // P&L the board wants, and for reconciling against Xero actuals.
+  A5: { severity: 'info', category: 'Sheet structure',
     title: 'No *Account column',
-    action: 'Add it, or account-level reporting is impossible for this source.' },
+    action: 'Add it when you want account-level reporting for this source.' },
   A6: { severity: 'info', category: 'Sheet structure',
     title: 'No Submitted_budget tab',
     action: 'No frozen record of what the funder was actually given.' },

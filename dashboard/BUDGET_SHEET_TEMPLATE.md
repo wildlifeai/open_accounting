@@ -90,7 +90,7 @@ General budget should be deleted. They are a hand-maintained duplicate of a deri
 | `Cost` | **yes** | GST-exclusive. Use `0`, not blank. |
 | `Income` | yes | GST-exclusive. A line where `Cost` and `Income` are both `0` is **silently skipped**. |
 | `Contribution` | yes | `Income − Cost`; the margin funding General. Already inside `Income`, so never counted twice. |
-| `*Account` | yes | Xero chart-of-accounts label exactly as `Name (code)`, e.g. `Salaries (477)`. |
+| `*Account` | yes | Xero chart-of-accounts label exactly as `Name (code)`, e.g. `Salaries (477)`. **Per line, not per milestone** — see below. |
 | `Milestone` | yes | Human milestone name. |
 | `Xero Inventory Item` | yes | The `{SOURCE}_{NNN}` product/service code, e.g. `WW_25_TOI_002`. This is the milestone dimension; without it a line falls out of the quarterly tracking grid. |
 | `Project` | yes (column) | Per-line override. Blank means "use the `Project` metadata value". The column must exist even if every cell is blank. |
@@ -99,6 +99,28 @@ General budget should be deleted. They are a hand-maintained duplicate of a deri
 Two columns are marked required-by-contract rather than required-by-parser: `*Account` and
 `Xero Inventory Item` are technically optional to `BudgetReader`, but account-level P&L and
 milestone tracking both break without them. Treat them as mandatory.
+
+Be aware `*Account` has **no consumer in the code today** — the only reads of `.account` anywhere
+are in a `WebApp.js` diagnostic that logs *actuals*, not budgets. It is captured for the quarterly
+account-level P&L the board needs, which is not built yet, and for reconciliation against Xero
+actuals, which do carry accounts. That is why health check A5 is `info` rather than a warning:
+nothing on screen is wrong without it.
+
+## One milestone spans many accounts
+
+A milestone is a chunk of work; an account is what kind of cost it is. They are separate dimensions
+and a budget row is their intersection, so **never create a milestone per account** — repeat the
+same `Xero Inventory Item` across as many rows as the milestone needs.
+
+Rollup is keyed on `project||source||milestone` (`Aggregator.js:29`), and account appears in no key,
+so rows sharing an item code aggregate into one milestone with the accounts preserved underneath.
+This is already how the live sheets work: `WW_25_TOI_002` spans eight accounts as a single
+milestone, `WW_25_TOI_003` spans four.
+
+A data-scientist milestone is therefore three rows — the contractor on `Contractors (410)`,
+recruitment on `Advertising (400)`, software on `Subscriptions (485)` — all carrying the same item
+code. Splitting it into three milestones would triple the rows in the quarterly tracking grid for
+no gain.
 
 ## `Forecast` tab
 

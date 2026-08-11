@@ -59,6 +59,30 @@ contribution — exactly the 40% the metadata declares.
 `WAI_27_EXAMPLE_001`. Without it a line falls outside quarterly tracking (B4), and on a budget
 that is mostly salaries that means most of the money.
 
+### One milestone, many accounts
+
+**Never create a milestone per Xero account.** A milestone is a chunk of work; an account is what
+kind of cost it is. They are different dimensions, and a budget row is the intersection of the two,
+so a milestone spans as many accounts as it needs — just repeat the same `Xero Inventory Item` on
+each row.
+
+The example shows it: `WAI_27_EXAMPLE_001` is one milestone across three rows —
+
+| Description | `*Account` | `Xero Inventory Item` |
+|---|---|---|
+| Data scientist contractor 0.4 FTE | `Contractors (410)` | `WAI_27_EXAMPLE_001` |
+| Recruitment for the data scientist | `Advertising (400)` | `WAI_27_EXAMPLE_001` |
+| Analysis software subscriptions | `Subscriptions (485)` | `WAI_27_EXAMPLE_001` |
+
+The dashboard rolls up on project + funding source + milestone, so those three rows appear as one
+milestone with a combined budget, and the accounts stay available underneath for reconciliation
+against Xero. Your existing sheets already work this way: `WW_25_TOI_002` spans eight accounts —
+salaries, rent, insurance, accounting, advertising, contractors, general expenses and volunteer
+expenses — as a single milestone.
+
+Splitting one milestone into three because the money lands in three accounts would triple the rows
+in the tracking grid and make quarterly reporting unreadable, for no gain.
+
 **`Project`** — leave blank to use the sheet's `Project` metadata value. Fill it only to send a
 line elsewhere, as the example's general-management line does to `General`.
 
