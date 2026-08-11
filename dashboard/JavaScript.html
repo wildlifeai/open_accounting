@@ -447,10 +447,16 @@
             '<span class="cell-actual">' + money0(c.actual) + '</span>' +
             '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
         }
-        // Future: forecast from gsheet (main), or dash if no forecast
-        var mainVal = c.hasForecast ? money0(c.forecast) : '<span class="no-fc">—</span>';
+        // Future: the Forecast-tab override when present, otherwise the budget
+        // baseline — which is what counts toward Expected. A dash here used to
+        // imply the cell contributed nothing, which was never true.
+        if (!c.hasForecast) {
+          return '<td class="' + cls.trim() + '"><div class="cell-q">' +
+            '<span class="no-fc">' + money0(c.baseline) + '</span>' +
+            '<span class="cell-base">budget, no override</span></div></td>';
+        }
         return '<td class="' + cls.trim() + '"><div class="cell-q">' +
-          '<span class="cell-actual">' + mainVal + '</span>' +
+          '<span class="cell-actual">' + money0(c.forecast) + '</span>' +
           '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
       }).join('');
 

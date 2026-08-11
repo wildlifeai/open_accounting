@@ -46,23 +46,40 @@ function runTests() {
   check('quarterSortNum order', quarterSortNum('26/27 Q1') > quarterSortNum('25/26 Q4'));
 
   // Forecast merge with FY columns: aggregate 'Up to last FY' + this FY quarters.
+  // Forecast overrides live on the milestone itself, read from each funding
+  // source's own Forecast tab by BudgetReader.parseForecastTab_.
   var entity = {
     id: 'WW_25_TOI', label: 'WW_25_TOI', type: 'source', source: 'WW_25_TOI',
     status: 'secured', project: 'Wildlife Watcher',
     milestones: [{ item: 'WW_25_TOI_002', milestone: 'General management', source: 'WW_25_TOI',
-      baseline: { '25/26 Q3': 4992, '25/26 Q4': 7615, '26/27 Q1': 7703, '26/27 Q2': 2792 },
-      actual: { '25/26 Q3': 2000, '25/26 Q4': 2500 } }]
+      baseline: { '25/26 Q3': 4992, '25/26 Q4': 7615,
+        '26/27 Q1': 7703, '26/27 Q2': 2792, '26/27 Q3': 1000 },
+      actual: { '25/26 Q3': 2000, '25/26 Q4': 2500 },
+      costForecast: { '26/27 Q2': 5000 },   // override on one future quarter only
+      forecastComment: 'staffing ramp' }]
   };
-  var fmap = { amounts: { 'WW_25_TOI||WW_25_TOI_002||26/27 Q1': { cost: 5000 } },
-    comments: { 'WW_25_TOI||WW_25_TOI_002': 'staffing ramp' } };
-  var grid = composeTracking(entity, fmap, quarterSortNum('26/27 Q1'));
+  var grid = composeTracking(entity, quarterSortNum('26/27 Q1'), 'cost');
   var m = grid.milestones[0];
+
+  // Look columns up by label - index arithmetic is brittle as columns evolve.
+  function cellFor(label) {
+    for (var i = 0; i < grid.columns.length; i++) {
+      if (grid.columns[i].label === label) return m.cells[i];
+    }
+    return null;
+  }
+
   check('first column is aggregate', grid.columns[0].type === 'aggregate');
   check('aggregate sums prior FY actual', m.cells[0].effective === 4500);
-  check('current quarter uses override', m.cells[1].effective === 5000 && m.cells[1].hasOverride);
-  check('future quarter uses baseline', m.cells[2].effective === 2792);
-  check('expected = 4500+5000+2792', m.expectedTotal === 12292);
-  check('baseline total = 23102', m.baselineTotal === 23102);
+  check('future quarter uses its override', cellFor('26/27 Q2').effective === 5000
+    && cellFor('26/27 Q2').hasForecast === true);
+  // Regression guard: an unmaintained Forecast tab must fall back to the budget
+  // baseline, never to 0. Reading 0 makes a source look certain to underspend.
+  check('future quarter with no override falls back to baseline',
+    cellFor('26/27 Q3').effective === 1000 && cellFor('26/27 Q3').hasForecast === false);
+  check('current quarter uses actual, not baseline', cellFor('26/27 Q1').effective === 0);
+  check('expected = 4500 + 0 + 5000 + 1000 + 0', m.expectedTotal === 10500);
+  check('baseline total = 24102', m.baselineTotal === 24102);
   check('comment carried through', m.comment === 'staffing ramp');
 
   Logger.log(results.join('\n'));
