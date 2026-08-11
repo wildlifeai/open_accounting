@@ -76,6 +76,48 @@ function runTests() {
   check('keeps an untagged/blank account', !isExcludedAccount_(''));
   check('keeps an unknown code', !isExcludedAccount_('Something New (999)'));
 
+  // Health findings: severity order, value at risk, and the checks the reader
+  // cannot make for itself. See dashboard/HEALTH_CHECKS.md.
+  var hBudgets = [{
+    name: 'WW_25_TOI', status: 'secured', projectFolder: 'Wildlife Watcher', sheetUrl: '',
+    metadata: { owner: 'victor@wildlife.ai' },
+    tabs: ['Budget', 'Forecast', 'Xero export'],
+    lines: [{ item: 'WW_25_TOI_002', cost: 100, income: 0, contribution: 0 },
+            { item: '', cost: 5000, income: 0, contribution: 0 }],
+    forecast: { cost: { 'WW_25_TOI_099||26/27 Q1': 50 }, income: {}, comments: {} },
+    issues: [{ check: 'B4', detail: '1 line without an item code' },
+             { check: 'A1', detail: 'missing column Cost' }]
+  }];
+  var hActuals = [{ kind: 'expense', project: '', fundingSource: '', amount: 4053 },
+                  { kind: 'expense', project: 'General', fundingSource: '', amount: 200 }];
+  var health = buildHealth(hBudgets, hActuals,
+    { xeroConnected: false, exclusion: { count: 3, total: 3090 }, secretsMissing: [] });
+  var hIds = health.map(function (f) { return f.id; });
+
+  check('missing column reported as A2, not A1', hIds.indexOf('A2') !== -1);
+  check('A3 flags a tab outside the three allowed', hIds.indexOf('A3') !== -1);
+  check('A6 flags the missing Submitted_budget tab', hIds.indexOf('A6') !== -1);
+  check('A9 flags a forecast for a milestone not in the budget', hIds.indexOf('A9') !== -1);
+  check('B4 carries value at risk, not just a count',
+    health.some(function (f) { return f.id === 'B4' && f.amount === 5000; }));
+  check('D1 counts only untagged expense',
+    health.some(function (f) { return f.id === 'D1' && f.amount === 4053; }));
+  check('D2 does not double-count the D1 line',
+    health.some(function (f) { return f.id === 'D2' && f.amount === 200; }));
+  check('F1 raised when Xero is disconnected', hIds.indexOf('F1') !== -1);
+  check('errors sort before warnings before info', (function () {
+    var rank = { error: 0, warning: 1, info: 2 };
+    for (var i = 1; i < health.length; i++) {
+      if (rank[health[i].severity] < rank[health[i - 1].severity]) return false;
+    }
+    return true;
+  })());
+  check('owner carried through from sheet metadata',
+    health.some(function (f) { return f.owner === 'victor@wildlife.ai'; }));
+  check('legacy dataFlags strings exclude info findings',
+    healthToFlags(health).length === health.filter(function (f) {
+      return f.severity !== 'info'; }).length);
+
   // Forecast merge with FY columns: aggregate 'Up to last FY' + this FY quarters.
   // Forecast overrides live on the milestone itself, read from each funding
   // source's own Forecast tab by BudgetReader.parseForecastTab_.

@@ -162,9 +162,20 @@ function buildSnapshot() {
     forecastEnd: isoOrNull_(latestBudgetEnd_(budgets))
   };
 
+  // Health findings. `dataFlags` was declared and never populated, so the warning
+  // area on the dashboard had never shown anything; it is now the error/warning
+  // summary of `health`.
+  const xeroOk = isXeroConnected();
+  const secretsMissing = ['XERO_CLIENT_ID', 'XERO_CLIENT_SECRET'].filter(k => !getSecret(k));
+  const health = buildHealth(budgets, actualLines, {
+    xeroConnected: xeroOk,
+    exclusion: lastExclusionSummary(),
+    secretsMissing: secretsMissing
+  });
+
   return {
     generatedAt: now.toISOString(),
-    xeroConnected: isXeroConnected(),
+    xeroConnected: xeroOk,
     currentQuarter: currentQuarterLabel(),
     coverage: coverage,
     totals: orgTotals_(rows),
@@ -173,7 +184,8 @@ function buildSnapshot() {
     breakdownRows: breakdownRows,
     tracking: tracking,
     timeline: timeline,
-    dataFlags: dataFlags
+    health: health,
+    dataFlags: dataFlags.concat(healthToFlags(health))
   };
 }
 
