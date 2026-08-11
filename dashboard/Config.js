@@ -27,6 +27,10 @@ const CONFIG = {
   BUDGET_TAB: 'Budget',
   FORECAST_TAB: 'Forecast',
   SUBMITTED_TAB: 'Submitted_budget',
+  // Sheet-level metadata (owner, status, funding dates, contribution policy) lives
+  // on its own tab as `key | value` rows in columns A and B. It used to sit as a
+  // block above the Budget columns; that still works and is read as a fallback.
+  FUNDING_INFO_TAB: 'Funding_info',
   // The `Budget` tab may carry a `key | value` metadata block above the column
   // header row (owner, status, funding dates, contribution policy - see
   // BUDGET_SHEET_TEMPLATE.md). The header row is therefore located, not assumed:

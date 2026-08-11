@@ -62,7 +62,7 @@ their projects, the GM sees everything.
 |---|---|---|---|
 | A1 | error | Funding-source file has no `Budget` tab | Whole file is invisible. Add or rename the tab. |
 | A2 | error | `Budget` tab missing `Start`, `End` or `Cost` | Whole file is invisible. Add the column. |
-| A3 | warning | Tabs beyond `Budget` / `Forecast` / `Submitted_budget` | Retire the extra tab; actuals live in Xero. |
+| A3 | warning | Tabs beyond `Funding_info` / `Budget` / `Forecast` / `Submitted_budget` | Retire the extra tab; actuals live in Xero. |
 | A4 | warning | No `Project` column | Lines cannot be split across projects. |
 | ~~A5~~ | — | ~~No `*Account` column~~ | **Retired 2026-08-11.** Budgets are set at milestone level, not per account, so its absence is expected. Nothing in the code read a budget line's account in any case. |
 | A6 | info | No `Submitted_budget` tab | No frozen record of what the funder was given. |

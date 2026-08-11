@@ -1,97 +1,90 @@
-# Budget sheet templates
+# Budget sheet template
 
-Importable CSV starting points for a funding-source spreadsheet. The full contract — every
-column, every field, and the silent failure modes — is in
-[`dashboard/BUDGET_SHEET_TEMPLATE.md`](../dashboard/BUDGET_SHEET_TEMPLATE.md). These files are
-the version you can actually import.
+**[`Budget_sheet_template.xlsx`](Budget_sheet_template.xlsx)** — import it once and you get a
+complete, correctly-named funding-source spreadsheet. The full contract, including every silent
+failure mode, is in
+[`dashboard/BUDGET_SHEET_TEMPLATE.md`](../dashboard/BUDGET_SHEET_TEMPLATE.md).
 
-| File | Becomes the tab |
+Four tabs:
+
+| Tab | Role |
 |---|---|
-| `Budget.csv` | `Budget` — the live baseline the cockpit reads |
-| `Forecast.csv` | `Forecast` — per-quarter overrides, optional |
+| `Funding_info` | sheet-level metadata as `key \| value` rows — owner, status, dates, contribution policy |
+| `Budget` | the live baseline the dashboard reads |
+| `Forecast` | optional per-quarter overrides |
+| `Submitted_budget` | frozen record of what the funder was given |
 
-**The filenames matter.** Google Sheets names an imported sheet after the file, so importing
-`Budget.csv` gives you a tab called `Budget` — which is the name the cockpit looks for. Check it
-afterwards anyway: if a tab of that name already exists, Sheets appends a number and the cockpit
-will not find it.
+It is an `.xlsx` rather than CSVs because CSV cannot carry formulas, data validation, number
+formats or more than one tab. The workbook carries all four.
 
 ## Creating a new funding source
 
-1. In the Budgets Drive, open the right project folder, then `secured/` or `proposed/`.
-2. **New → Google Sheets**, and name the file **exactly** as its Xero *Funding source* tracking
-   value — e.g. `WAI_27_OMV`. Budgets and actuals join on this string, so a mismatch means the
-   sheet shows a budget with no spend against it.
-3. **File → Import → Upload** `Budget.csv`, and choose **Insert new sheet(s)**.
-4. Repeat for `Forecast.csv` if you need overrides. Skip it otherwise — a quarter with no entry
-   falls back to the budget baseline, so an absent `Forecast` tab is a perfectly good state.
-5. Delete the default `Sheet1`.
-6. Fill in the metadata block, then replace the example lines.
-7. At submission, duplicate the `Budget` tab (right-click → **Duplicate**) and rename the copy
-   `Submitted_budget`. That is the frozen record of what the funder was given; never edit it.
+1. Upload `Budget_sheet_template.xlsx` to the right project folder in the Budgets Drive
+   (`secured/` or `proposed/`).
+2. Right-click it → **Open with → Google Sheets**. Drive converts it, keeping all four tab names,
+   the formulas, the dropdowns and the formatting.
+3. Rename the file **exactly** as its Xero *Funding source* tracking value — e.g. `SPY_27_UOA`.
+   Budgets and actuals join on this string, so a mismatch shows a budget with no spend against it.
+4. Delete the original `.xlsx` upload once the Sheet exists.
+5. Fill in `Funding_info`, then replace the example rows on `Budget`.
+6. At submission, copy the `Budget` rows onto `Submitted_budget` and never touch them again.
 
-No other tabs. The dashboard flags extras (health check A3), because actuals live in Xero and a
-per-sheet copy of them drifts.
+## What is already wired up
 
-## Filling it in
+**Formulas.** `Contribution` is `Income − Cost` per row. `Funding_info` derives `Amount requested`,
+total cost, total income, total contribution and contribution as a percentage of income straight
+from the `Budget` tab, so the header can never disagree with the rows beneath it. The `Forecast` and
+`Submitted_budget` tabs carry their own totals.
 
-**Metadata block** — keys in column A, values in column B, above the column header row. All
-thirteen fields are expected; `Amount secured` is `0` while a bid is proposed, and
-`Decision date` is blank once it is secured.
+**Dropdowns.** `Status` (secured / proposed / archived), `Contribution policy`
+(`none` / `percent_of_income:40` / `percent_of_income:20` / `per_line`), and `Project` on the
+`Budget` tab.
 
-`Contribution policy` is the one people skip, and it is the field that finally replaces
-hand-computing overheads each quarter. One of:
+**Colour coding.** Yellow cells are yours to fill. Grey cells are formulas — leave them alone.
+Green is a header row.
 
-- `none` — project-specific grant that disallows overheads
-- `percent_of_income:40` — 40% of this source's income funds General
-- `per_line` — the split is expressed per line via the `Project` column
+## Two things that will bite
 
-**Dates** — `DD/MMM/YY`, e.g. `01/Oct/26`. Check the year: `30/Jun/01` parses as **2001**, and a
-line whose End precedes its Start is dropped entirely (health check B3).
+**Do not add a totals row to the `Budget` tab.** It would be read as a budget line. Totals live on
+`Funding_info`, derived. (`Total` rows *are* safe on the `Forecast` tab — the parser skips them.)
 
-**Amounts** — plain numbers. `24000`, not `$24,000`. A currency symbol is tolerated but a comma
-inside an unquoted CSV field will split the row.
+**`Forecast` column headers are generated, so do not retype them.** Each one is a formula anchored
+on `Funding_info!Funding start`, producing `Jul-Sep 26 Forecast` and the three quarters after it. Set
+the funding start date and the headers follow.
 
-**`Contribution`** — the template deliberately has no such column. When it is absent the dashboard
-derives it as `Income − Cost`, which is what it should equal anyway, so leaving it out is safer than
-maintaining it. In the example the three rows total $36,000 cost against $60,000 income, giving
-$24,000 of derived contribution — exactly the 40% the metadata declares. Only add the column if a
-line's contribution genuinely differs from `Income − Cost`, and expect health check B5 to police it.
+They are deliberately **not** anchored on `TODAY()`. A `TODAY()`-based header relabels itself as time
+passes while the figure beneath it stays put, so on the first day of a new quarter every forecast
+silently ends up applied to a quarter it was never meant for. Anchoring on the grant's own start date
+keeps each label fixed for the life of the grant.
 
-**`Xero Inventory Item`** is the milestone code, formatted `SOURCE_YY_NAME_NNN` — e.g.
-`WAI_27_EXAMPLE_001`. Without it a line falls outside quarterly tracking (B4), and on a budget
-that is mostly salaries that means most of the money.
+The format must remain exactly `MMM-MMM YY Forecast`; the year is not optional, and
+`Jul-Sep Forecast` fails to parse, discarding that whole quarter without an error. If you need more
+than four quarters, copy a header cell sideways and add 3 to both `EOMONTH` offsets.
 
-### Budget at milestone level — one row per milestone
+Forecast rows must start with the `Xero Inventory Item` in `CODE - Name` form
+(`SPY_26_EXAMPLE_001 - Baseline model assessment`) — readable *and* resolvable, since the dashboard
+splits on `' - '` and keys on the code.
 
-**Do not itemise the budget by Xero account.** One row per milestone, whatever mix of accounts the
-spend will eventually land on. The example's Delivery milestone is a single row covering a data
-scientist, their recruitment and the analysis software — three Xero accounts, one budget line.
+## Filling in the Budget tab
 
-Actuals arriving from Xero still carry their own account codes, so nothing is lost on the reporting
-side; you simply are not asked to predict the split in advance.
+**One row per milestone, or several rows sharing one `Xero Inventory Item`.** The example splits
+each milestone into a Data Scientist row and a Project Manager row; both carry the same item code,
+so they roll up as one milestone while staying legible. Do **not** itemise by Xero account — there
+is no `*Account` column, because nothing reads it and predicting the account split months ahead is
+wasted effort.
 
-That is why the template has no `*Account` column. It is optional to the parser, no code reads a
-budget line's account, and health check A5 (which used to ask for it) was retired.
+**`Milestone` is the load-bearing column, `Description` is not.** `Milestone` is the grouping key
+for the Overview breakdown, the row label in the tracking grid, and a filter dimension. Leave it
+blank and the whole funding source collapses into one `(unassigned)` group. `Description` is read by
+nothing — use it for the human detail, as the example does with roles.
 
-**`Project`** — leave blank to use the sheet's `Project` metadata value. Fill it only to send a
-line elsewhere, as the example's general-management line does to `General`.
-
-## The Forecast tab
-
-Only worth creating when you know something the budget does not: a delayed hire, a grant ending
-early, a re-profiled milestone. Two rules break it silently if you get them wrong:
-
-- Quarter column headers must read **exactly** `MMM-MMM YY Forecast`, e.g. `Jul-Sep 26 Forecast`.
-  Anything else is ignored, discarding that whole quarter with no error (A7).
-- Rows must be `CODE - Name`, where `CODE` matches a `Xero Inventory Item` on the `Budget` tab
-  (A8, A9).
-
-Parsing stops at a column-A value of `Funding Source Details`, which makes everything below it a
-safe place for working notes.
+**Dates** — real dates formatted `DD/MMM/YY`. A line whose End precedes its Start is dropped
+entirely, and two-digit years are the usual cause: `30/Jun/01` is the year 2001.
 
 ## Checking your work
 
 Open the Funding Cockpit and look at the **Health** panel. It names the sheet, the row and what to
-do — reversed dates, missing item codes, unexpected tabs, unparseable forecast headers. If a sheet
-you have just created does not appear at all, the usual causes are a tab not named `Budget`, a
-missing `Start`/`End`/`Cost` column, or a filename that does not match the Xero tracking value.
+do. Importing this template unaltered produces no findings, so anything reported afterwards is your
+own data. If a sheet you have just created does not appear at all, the usual causes are a tab not
+named `Budget`, a missing `Start`/`End`/`Cost` column, or a filename that does not match the Xero
+tracking value.

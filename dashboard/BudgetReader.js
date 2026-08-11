@@ -66,8 +66,13 @@ function readStatusFolder_(projectFolder, subName, status, out) {
       const parsed = parseBudgetFile_(ss, projectFolder.getName());
       entry.lines = parsed.lines;
       entry.hasProjectColumn = parsed.hasProjectColumn;
-      entry.metadata = parsed.metadata;
       entry.issues = entry.issues.concat(parsed.issues);
+
+      // Metadata: the Funding_info tab wins where present, falling back to a
+      // `key | value` block above the Budget columns.
+      entry.metadata = parsed.metadata || {};
+      const info = parseFundingInfoTab_(ss);
+      if (info) Object.keys(info).forEach(k => { entry.metadata[k] = info[k]; });
 
       const forecast = parseForecastTab_(ss);
       entry.forecast = forecast.data;
@@ -188,6 +193,29 @@ function findHeaderRow_(data) {
     if (row.indexOf(startName) !== -1 && row.indexOf(costName) !== -1) return i;
   }
   return -1;
+}
+
+/**
+ * Read the Funding_info tab as `key | value` pairs from columns A and B.
+ * Returns null when the tab is absent, so the caller can fall back to a metadata
+ * block above the Budget columns. Rows with no value in column B - the tab title,
+ * any legend, section headings - are skipped.
+ */
+function parseFundingInfoTab_(ss) {
+  const sheet = ss.getSheetByName(CONFIG.FUNDING_INFO_TAB);
+  if (!sheet) return null;
+  const data = sheet.getDataRange().getValues();
+  const meta = {};
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i] || [];
+    const key = clean_(row[0]);
+    if (!key) continue;
+    const raw = row.length > 1 ? row[1] : '';
+    const val = (raw instanceof Date) ? raw : clean_(raw);
+    if (val === '') continue;
+    meta[key.toLowerCase()] = val;
+  }
+  return meta;
 }
 
 /** Read the `key | value` block above the header row into a lower-cased map. */

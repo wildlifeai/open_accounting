@@ -121,14 +121,14 @@ function buildHealth(budgets, actualLines, ctx) {
     });
 
     // --- A3 / A6: tab hygiene ---
+    const allowedTabs = [CONFIG.FUNDING_INFO_TAB, CONFIG.BUDGET_TAB,
+      CONFIG.FORECAST_TAB, CONFIG.SUBMITTED_TAB];
     const allowed = {};
-    allowed[CONFIG.BUDGET_TAB] = true;
-    allowed[CONFIG.FORECAST_TAB] = true;
-    allowed[CONFIG.SUBMITTED_TAB] = true;
+    allowedTabs.forEach(t => { allowed[t] = true; });
     (b.tabs || []).forEach(t => {
       if (!allowed[t]) {
         add('A3', withBase_(base, { detail: 'tab "' + t + '" is not one of ' +
-          CONFIG.BUDGET_TAB + ' / ' + CONFIG.FORECAST_TAB + ' / ' + CONFIG.SUBMITTED_TAB }));
+          allowedTabs.join(' / ') }));
       }
     });
     if ((b.tabs || []).length && (b.tabs || []).indexOf(CONFIG.SUBMITTED_TAB) === -1) {

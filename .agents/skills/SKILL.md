@@ -234,13 +234,19 @@ Rules that follow from this:
 
 # 3. Budget Sheet Contract
 
-**A funding-source spreadsheet has at most three tabs (rule set 2026-08-11):**
+**A funding-source spreadsheet has at most four tabs (rule set 2026-08-11):**
 
 | Tab | Role |
 |---|---|
+| `Funding_info` | sheet-level metadata as `key \| value` rows in columns A and B |
 | `Budget` | the live baseline the cockpit reads — the approved plan, changed only for a genuine re-budget |
 | `Forecast` | per-quarter overrides where you know something the budget does not |
 | `Submitted_budget` | frozen as-submitted record of what the funder was actually given |
+
+Start from [`budget_templates/Budget_sheet_template.xlsx`](../../budget_templates/), which carries
+all four tabs, the formulas and the dropdowns. Metadata may still appear as a block above the
+`Budget` columns — `parseBudgetFile_` reads that as a fallback — but `Funding_info` wins where both
+exist, and it is where new sheets should put it.
 
 Everything else goes: `Budget, Actual, Forecast Tracking` grids, pasted Xero transaction exports,
 milestone summaries, forecast breakdowns, income summaries, funding-tracking header blocks. Actuals
