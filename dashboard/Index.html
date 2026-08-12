@@ -50,7 +50,12 @@
             </div>
             <div class="bd-controls">
               <span class="bd-label">timeframe:</span>
-              <label><input type="checkbox" id="bd-restrict-fy"> Restrict to this financial year</label>
+              <!-- On by default. Unrestricted spans every budget line ever parsed (Feb 2025
+                   to Sep 2027 at the time of writing), so budget and actual describe
+                   different sets of grants and the percentage is meaningless: a closed grant
+                   reads 100% spent, one starting next quarter reads 0%. Uncheck for the
+                   all-time view. -->
+              <label><input type="checkbox" id="bd-restrict-fy" checked> Restrict to this financial year</label>
             </div>
             <div class="bd-controls">
               <span class="bd-label">filter:</span>
