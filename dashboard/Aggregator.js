@@ -111,6 +111,11 @@ function buildSnapshot() {
   actualLines.forEach(l => {
     if (l.kind !== 'expense') return;
     if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
+    // An archived source's budget file is skipped by the crawl (readStatusFolder_),
+    // so keeping its actuals guaranteed a mismatch: spend with no budget beside it,
+    // inflating org actuals and making the whole organisation look overspent.
+    // buildTimeline_ already filtered both, so the two views disagreed.
+    if (startsWith_(l.fundingSource || '', CONFIG.ARCHIVE_PREFIX)) return;
     const p = project_(l.project);
     p.actualExpense += l.amount;
     
