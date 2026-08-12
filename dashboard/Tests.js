@@ -206,6 +206,86 @@ function runTests() {
   check('baseline total = 24102', m.baselineTotal === 24102);
   check('comment carried through', m.comment === 'staffing ramp');
 
+  // Project-lead scoped access. filterSnapshotForProjects_ is pure precisely so this can
+  // run without a second Google account signed in.
+  var snap = {
+    generatedAt: '2026-08-12T00:00:00Z', xeroConnected: true, currentQuarter: '26/27 Q2',
+    coverage: {},
+    totals: { budget: 999, secured: 999, actual: 999, unsecuredGap: 999,
+              budgetFY: 999, securedFY: 999, actualFY: 999, unsecuredGapFY: 999 },
+    projects: [
+      { project: 'Spyfish Aotearoa', proposedBudget: 100, securedIncome: 60,
+        actualExpense: 40, unsecuredGap: 40, proposedBudgetFY: 10, securedIncomeFY: 6,
+        actualExpenseFY: 4, unsecuredGapFY: 4 },
+      { project: 'Wildlife Watcher', proposedBudget: 200, securedIncome: 50,
+        actualExpense: 70, unsecuredGap: 150, proposedBudgetFY: 20, securedIncomeFY: 5,
+        actualExpenseFY: 7, unsecuredGapFY: 15 }
+    ],
+    fundingSources: [{ project: 'Spyfish Aotearoa', name: 'SPY_26_UOA' },
+                     { project: 'Wildlife Watcher', name: 'WW_25_TOI' }],
+    breakdownRows: [{ project: 'Spyfish Aotearoa' }, { project: 'Wildlife Watcher' }],
+    tracking: [{ id: 'SPY_26_UOA', milestones: [{ project: 'Spyfish Aotearoa' }] },
+               { id: 'WW_25_TOI', milestones: [{ project: 'Wildlife Watcher' }] }],
+    timeline: [{ project: 'Spyfish Aotearoa' }, { project: 'Wildlife Watcher' }],
+    health: [
+      { id: 'B4', severity: 'error', project: 'Spyfish Aotearoa',
+        fundingSource: 'SPY_26_UOA', title: 'mine', detail: '', amount: 1,
+        owner: 'a@wildlife.ai', link: 'https://sheet/spy' },
+      { id: 'A1', severity: 'error', project: 'Wildlife Watcher',
+        fundingSource: 'WW_25_TOI', title: 'not mine', detail: '', amount: 2,
+        owner: 'b@wildlife.ai', link: 'https://sheet/ww' },
+      { id: 'D1', severity: 'error', project: '', fundingSource: '',
+        title: 'org-wide untagged spend', detail: '', amount: 5000 },
+      { id: 'F5', severity: 'info', project: '', fundingSource: '',
+        title: 'Refresh summary', detail: '11 funding source(s) read' },
+      { id: 'F1', severity: 'error', project: '', fundingSource: '',
+        title: 'Xero is not connected', detail: '' }
+    ],
+    dataFlags: ['stale flag that must be rebuilt from the filtered findings']
+  };
+
+  var lead = filterSnapshotForProjects_(JSON.parse(JSON.stringify(snap)),
+                                        ['Spyfish Aotearoa']);
+  check('scoped: access level is filtered', lead._accessLevel === 'filtered');
+  check('scoped: only their project', lead.projects.length === 1 &&
+    lead.projects[0].project === 'Spyfish Aotearoa');
+  check('scoped: funding sources filtered', lead.fundingSources.length === 1 &&
+    lead.fundingSources[0].name === 'SPY_26_UOA');
+  check('scoped: breakdown filtered', lead.breakdownRows.length === 1);
+  check('scoped: tracking filtered', lead.tracking.length === 1 &&
+    lead.tracking[0].id === 'SPY_26_UOA');
+  check('scoped: timeline filtered', lead.timeline.length === 1);
+  // Totals must be rebuilt, never inherited: 999 would leak the org-wide figure.
+  check('scoped: totals recomputed from their project only',
+    lead.totals.budget === 100 && lead.totals.secured === 60 &&
+    lead.totals.actual === 40 && lead.totals.unsecuredGap === 40);
+  check('scoped: FY totals recomputed too',
+    lead.totals.budgetFY === 10 && lead.totals.actualFY === 4);
+
+  var hIds2 = lead.health.map(function (f) { return f.id; });
+  check('scoped: keeps their own finding', hIds2.indexOf('B4') !== -1);
+  check('scoped: hides another project\'s finding', hIds2.indexOf('A1') === -1);
+  check('scoped: hides org-wide untagged spend (D1)', hIds2.indexOf('D1') === -1);
+  check('scoped: hides the org-wide refresh summary (F5)', hIds2.indexOf('F5') === -1);
+  check('scoped: keeps Xero disconnected (F1), their numbers are stale too',
+    hIds2.indexOf('F1') !== -1);
+  check('scoped: no other sheet link survives', lead.health.every(function (f) {
+    return !f.link || f.link.indexOf('/ww') === -1; }));
+  check('scoped: no other owner email survives', lead.health.every(function (f) {
+    return f.owner !== 'b@wildlife.ai'; }));
+  check('scoped: dataFlags rebuilt from the filtered findings, not inherited',
+    lead.dataFlags.length === healthToFlags(lead.health).length &&
+    lead.dataFlags.join(' ').indexOf('stale flag') === -1);
+
+  var none = filterSnapshotForProjects_(JSON.parse(JSON.stringify(snap)), []);
+  check('no access: everything empty', none._accessLevel === 'none' &&
+    none.projects.length === 0 && none.health.length === 0 &&
+    none.dataFlags.length === 0 && none.totals.budget === 0);
+
+  var admin = filterSnapshotForProjects_(JSON.parse(JSON.stringify(snap)), ['*']);
+  check('admin: sees everything', admin._accessLevel === 'admin' &&
+    admin.health.length === 5 && admin.projects.length === 2);
+
   Logger.log(results.join('\n'));
   return results;
 }

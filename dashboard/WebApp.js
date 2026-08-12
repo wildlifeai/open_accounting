@@ -31,13 +31,32 @@ function getCurrentUserEmail_() {
 function getFilteredSnapshot_() {
   const snap = getSnapshot();
   if (!snap) return null;
-
   const email = getCurrentUserEmail_();
-  const allowedProjects = getUserPermissions(email);
+  const out = filterSnapshotForProjects_(snap, getUserPermissions(email));
+  if (out) out._userEmail = email;
+  return out;
+}
 
-  // If full access, return everything
+/**
+ * System findings a project-scoped user still needs, because each one means the numbers
+ * they are looking at are stale. Everything else that carries no project is org-wide:
+ * D1 and D2 are organisation dollar totals, F5 counts every source in the org.
+ */
+const SCOPED_VISIBLE_SYSTEM_CHECKS = { F1: true, F3: true };
+
+/**
+ * Reduce a snapshot to the projects a user may see. Pure over its inputs, so the
+ * project-lead persona can be exercised without a second Google account.
+ *
+ * `allowedProjects` is ['*'] for full access, [] for none, or a list of project names.
+ */
+function filterSnapshotForProjects_(snap, allowedProjects) {
+  if (!snap) return null;
+  allowedProjects = allowedProjects || [];
+
+  // If full access, return everything. Deliberately not a copy: the snapshot is large
+  // and the admin path runs on every load.
   if (allowedProjects.length === 1 && allowedProjects[0] === '*') {
-    snap._userEmail = email;
     snap._accessLevel = 'admin';
     return snap;
   }
@@ -56,8 +75,8 @@ function getFilteredSnapshot_() {
       breakdownRows: [],
       tracking: [],
       timeline: [],
+      health: [],
       dataFlags: [],
-      _userEmail: email,
       _accessLevel: 'none'
     };
   }
@@ -87,6 +106,19 @@ function getFilteredSnapshot_() {
     filteredSnap.timeline = filteredSnap.timeline.filter(t => allowedProjects.includes(t.project));
   }
 
+  // Health findings name their funding source, its owner's email, the dollars at risk and
+  // a link straight to the sheet. Unfiltered, the panel showed a project lead every budget
+  // in the organisation. This was invisible while dataFlags was never populated; once
+  // HealthCheck started filling it, it became a live leak.
+  if (filteredSnap.health) {
+    filteredSnap.health = filteredSnap.health.filter(function (f) {
+      return f.project ? allowedProjects.indexOf(f.project) !== -1
+                       : !!SCOPED_VISIBLE_SYSTEM_CHECKS[f.id];
+    });
+  }
+  // Derive the legacy flags from the filtered findings, so the two cannot disagree.
+  filteredSnap.dataFlags = healthToFlags(filteredSnap.health || []);
+
   // Recalculate totals based on filtered projects
   var totals = { budget: 0, secured: 0, actual: 0, unsecuredGap: 0,
                  budgetFY: 0, securedFY: 0, actualFY: 0, unsecuredGapFY: 0 };
@@ -98,7 +130,6 @@ function getFilteredSnapshot_() {
   });
   filteredSnap.totals = totals;
 
-  filteredSnap._userEmail = email;
   filteredSnap._accessLevel = 'filtered';
   return filteredSnap;
 }
