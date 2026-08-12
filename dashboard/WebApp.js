@@ -154,6 +154,18 @@ function apiRefresh() {
 }
 
 /**
+ * Client API: the current refresh phase, polled by the browser while apiRefresh is
+ * outstanding. Deliberately does no Drive or Xero work and takes no lock, so it can
+ * answer while a refresh holds the script lock.
+ *
+ * Returns null when nothing is running. Carries no project data, so it needs no
+ * permission filtering: the phase names are sheet names the poller already triggered.
+ */
+function apiRefreshProgress() {
+  return readRefreshProgress_();
+}
+
+/**
  * Diagnostic (run from the editor): rebuild the snapshot and log how many
  * breakdown rows / projects / sources it produced, plus a sample row. Confirms
  * the data side independently of the deployed web app + cache.

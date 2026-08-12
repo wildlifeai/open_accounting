@@ -304,12 +304,75 @@
         ' – ' + monthYear(end) + '</b></span>';
   }
 
+  // ---- Refresh progress ---------------------------------------------------
+  // apiRefresh blocks for about a minute. Apps Script cannot stream, so the server
+  // writes its phase to CacheService and we poll apiRefreshProgress for it.
+  //
+  // The poll only answers if Apps Script runs it concurrently with the refresh. If it
+  // does not, sawProgress stays false and the label says so rather than lying: the
+  // elapsed counter still runs, so the wait is bounded either way.
+  var progressTimer = null, elapsedTimer = null, startedAt = 0, sawProgress = false;
+
+  function showProgress(on) {
+    var box = document.getElementById('refresh-progress');
+    if (box) box.classList.toggle('hidden', !on);
+    if (!on) setBar(0, '');
+  }
+
+  function setBar(pct, label) {
+    var fill = document.getElementById('refresh-bar-fill');
+    var text = document.getElementById('refresh-bar-label');
+    if (fill) fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if (text) text.textContent = label;
+  }
+
+  function elapsedText() {
+    return Math.round((new Date().getTime() - startedAt) / 1000) + 's';
+  }
+
+  function startProgress() {
+    startedAt = new Date().getTime();
+    sawProgress = false;
+    showProgress(true);
+    setBar(0, 'starting… 0s');
+
+    elapsedTimer = setInterval(function () {
+      if (!sawProgress) setBar(0, 'working… ' + elapsedText() + ' (no progress detail)');
+    }, 1000);
+
+    progressTimer = setInterval(function () {
+      google.script.run.withSuccessHandler(function (p) {
+        if (!p) return;                       // finished, or not started yet
+        sawProgress = true;
+        // Prefer the server's overall pct: it bands the phases by measured duration, so
+        // the bar only moves forward. done/total is the fallback for older payloads.
+        var pct = (p.pct === null || p.pct === undefined)
+          ? (p.total > 0 ? (p.done / p.total) * 100 : 0)
+          : p.pct;
+        var counter = p.total > 0 ? ' (' + p.done + ' of ' + p.total + ')' : '';
+        setBar(pct, p.phase + counter + ' · ' + elapsedText());
+      }).withFailureHandler(function () { /* a failed poll must not break the refresh */ })
+        .apiRefreshProgress();
+    }, 1500);
+  }
+
+  function stopProgress() {
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    showProgress(false);
+  }
+
   function load(force) {
     var btn = document.getElementById('refresh');
     btn.disabled = true; btn.textContent = force ? 'Refreshing…' : 'Refresh now';
+    if (force) startProgress();
     var call = google.script.run
-      .withSuccessHandler(function (s) { render(s); btn.disabled = false; btn.textContent = 'Refresh now'; })
+      .withSuccessHandler(function (s) {
+        stopProgress();
+        render(s); btn.disabled = false; btn.textContent = 'Refresh now';
+      })
       .withFailureHandler(function (e) {
+        stopProgress();
         document.getElementById('sync-label').textContent = 'error: ' + e.message;
         btn.disabled = false; btn.textContent = 'Refresh now';
       });

@@ -28,14 +28,29 @@
  */
 function readAllBudgets() {
   const root = DriveApp.getFolderById(CONFIG.BUDGETS_ROOT_FOLDER_ID);
-  const sources = [];
+
+  // Two passes. The first only walks folders, which is cheap. The second opens each
+  // spreadsheet, which costs 1-3 seconds apiece and is the bulk of a refresh. Counting
+  // first is what lets the progress bar say "4 of 12" instead of animating meaninglessly.
+  const found = [];
   const projectFolders = root.getFolders();
   while (projectFolders.hasNext()) {
     const projectFolder = projectFolders.next();
     if (startsWithArchive_(projectFolder.getName())) continue;
-    readStatusFolder_(projectFolder, CONFIG.SECURED_FOLDER_NAME, 'secured', sources);
-    readStatusFolder_(projectFolder, CONFIG.PROPOSED_FOLDER_NAME, 'proposed', sources);
+    collectStatusFolder_(projectFolder, CONFIG.SECURED_FOLDER_NAME, 'secured', found);
+    collectStatusFolder_(projectFolder, CONFIG.PROPOSED_FOLDER_NAME, 'proposed', found);
   }
+
+  const sources = [];
+  for (let i = 0; i < found.length; i++) {
+    const f = found[i];
+    // Reading occupies the 20-50% band: measured at ~14s of a ~60s refresh.
+    setRefreshProgress_('Reading ' + f.file.getName(), i + 1, found.length,
+                        20 + Math.round(30 * i / Math.max(1, found.length)));
+    readBudgetFile_(f.projectFolder, f.status, f.file, sources);
+  }
+  setRefreshProgress_('Read ' + found.length + ' funding source(s)',
+                      found.length, found.length, 50);
   return sources;
 }
 
@@ -43,51 +58,56 @@ function startsWithArchive_(name) {
   return name.indexOf(CONFIG.ARCHIVE_PREFIX) === 0;
 }
 
-function readStatusFolder_(projectFolder, subName, status, out) {
+/** Folder walk only. Nothing here opens a spreadsheet, so it stays cheap. */
+function collectStatusFolder_(projectFolder, subName, status, out) {
   const subs = projectFolder.getFoldersByName(subName);
   if (!subs.hasNext()) return;
   const files = subs.next().getFilesByType(MimeType.GOOGLE_SHEETS);
   while (files.hasNext()) {
     const file = files.next();
     if (startsWithArchive_(file.getName())) continue;
-
-    const entry = { name: file.getName(), status: status,
-      projectFolder: projectFolder.getName(), lines: [], hasProjectColumn: false,
-      metadata: {}, tabs: [], sheetUrl: '',
-      forecast: { cost: {}, income: {}, comments: {} }, issues: [] };
-    try {
-      // Open once and share. This file used to be opened twice - once for the
-      // Budget tab, once for Forecast - and the crawl already approaches the
-      // Apps Script 6-minute limit.
-      const ss = SpreadsheetApp.openById(file.getId());
-      entry.sheetUrl = ss.getUrl();
-      entry.tabs = ss.getSheets().map(s => s.getName());
-
-      const parsed = parseBudgetFile_(ss, projectFolder.getName());
-      entry.lines = parsed.lines;
-      entry.hasProjectColumn = parsed.hasProjectColumn;
-      entry.issues = entry.issues.concat(parsed.issues);
-
-      // Metadata: the Funding_info tab wins where present, falling back to a
-      // `key | value` block above the Budget columns.
-      entry.metadata = parsed.metadata || {};
-      const info = parseFundingInfoTab_(ss);
-      if (info) Object.keys(info).forEach(k => { entry.metadata[k] = info[k]; });
-
-      // Budget lines are passed in so Forecast row labels can be resolved against
-      // them. Order matters: the Budget tab must be parsed first.
-      const forecast = parseForecastTab_(ss, parsed.lines);
-      entry.forecast = forecast.data;
-      entry.issues = entry.issues.concat(forecast.issues);
-    } catch (e) {
-      // A file that will not parse is invisible on the dashboard. Report it as a
-      // finding instead of only logging, and still push the entry so the source
-      // appears in Health rather than disappearing without trace.
-      entry.issues.push({ check: 'A1', detail: e.message });
-      Logger.log('Skipped ' + file.getName() + ': ' + e.message);
-    }
-    out.push(entry);
+    out.push({ projectFolder: projectFolder, status: status, file: file });
   }
+}
+
+/** Read one funding-source spreadsheet. This is the expensive step. */
+function readBudgetFile_(projectFolder, status, file, out) {
+  const entry = { name: file.getName(), status: status,
+    projectFolder: projectFolder.getName(), lines: [], hasProjectColumn: false,
+    metadata: {}, tabs: [], sheetUrl: '',
+    forecast: { cost: {}, income: {}, comments: {} }, issues: [] };
+  try {
+    // Open once and share. This file used to be opened twice - once for the
+    // Budget tab, once for Forecast - and the crawl already approaches the
+    // Apps Script 6-minute limit.
+    const ss = SpreadsheetApp.openById(file.getId());
+    entry.sheetUrl = ss.getUrl();
+    entry.tabs = ss.getSheets().map(s => s.getName());
+
+    const parsed = parseBudgetFile_(ss, projectFolder.getName());
+    entry.lines = parsed.lines;
+    entry.hasProjectColumn = parsed.hasProjectColumn;
+    entry.issues = entry.issues.concat(parsed.issues);
+
+    // Metadata: the Funding_info tab wins where present, falling back to a
+    // `key | value` block above the Budget columns.
+    entry.metadata = parsed.metadata || {};
+    const info = parseFundingInfoTab_(ss);
+    if (info) Object.keys(info).forEach(k => { entry.metadata[k] = info[k]; });
+
+    // Budget lines are passed in so Forecast row labels can be resolved against
+    // them. Order matters: the Budget tab must be parsed first.
+    const forecast = parseForecastTab_(ss, parsed.lines);
+    entry.forecast = forecast.data;
+    entry.issues = entry.issues.concat(forecast.issues);
+  } catch (e) {
+    // A file that will not parse is invisible on the dashboard. Report it as a
+    // finding instead of only logging, and still push the entry so the source
+    // appears in Health rather than disappearing without trace.
+    entry.issues.push({ check: 'A1', detail: e.message });
+    Logger.log('Skipped ' + file.getName() + ': ' + e.message);
+  }
+  out.push(entry);
 }
 
 function parseBudgetFile_(ss, projectFolderName) {

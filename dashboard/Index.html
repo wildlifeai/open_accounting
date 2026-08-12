@@ -14,6 +14,13 @@
       </div>
     </header>
 
+    <!-- Refresh progress. Populated by polling apiRefreshProgress; hidden unless a
+         refresh is running. See the progress notes in JavaScript.html. -->
+    <div id="refresh-progress" class="refresh-progress hidden">
+      <div class="refresh-bar"><div id="refresh-bar-fill" class="refresh-bar-fill"></div></div>
+      <span id="refresh-bar-label" class="refresh-bar-label"></span>
+    </div>
+
     <div id="xero-warning" class="banner hidden">
       Xero is not connected — actuals are unavailable.
       <a id="xero-link" href="#" target="_blank">Connect Xero</a>

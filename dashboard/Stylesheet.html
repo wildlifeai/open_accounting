@@ -24,7 +24,16 @@
     padding: 10px 14px; margin-bottom: 16px; font-size: 13px; }
   .banner a { color: var(--danger-text); font-weight: 500; margin-left: 8px; }
   .hidden { display: none; }
-  
+
+  /* Refresh progress. A refresh is around a minute, almost all of it opening one
+     spreadsheet at a time, so the wait has to look bounded rather than broken. */
+  .refresh-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .refresh-bar { flex: 1; height: 6px; background: var(--bg2); border: 1px solid var(--line);
+    border-radius: 3px; overflow: hidden; }
+  .refresh-bar-fill { height: 100%; width: 0; background: var(--green);
+    border-radius: 3px; transition: width .4s ease; }
+  .refresh-bar-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
   .overview-section { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
   .overview-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
   .overview-section > h2 { font-size: 16px; font-weight: 600; color: var(--text); margin: 0 0 16px 0; }

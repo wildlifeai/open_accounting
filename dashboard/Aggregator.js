@@ -19,9 +19,13 @@ function buildSnapshot() {
   const now = new Date();
   const fy = fyBounds_(now);
 
+  // The folder walk is not free: measured at ~13s of a ~60s refresh, because DriveApp
+  // folder and file iterators are slow even though nothing is opened yet.
+  setRefreshProgress_('Finding budget sheets', 0, 0, 2);
   const budgets = readAllBudgets();
   const actualSince = earliestBudgetStart_(budgets);
   const actualLines = isXeroConnected() ? fetchXeroActuals(actualSince) : [];
+  setRefreshProgress_('Aggregating ' + actualLines.length + ' actual line(s)', 0, 0, 90);
 
   const projects = {}; // name -> rollup accumulator
   const fundingSources = []; // per-source summary
@@ -111,7 +115,7 @@ function buildSnapshot() {
   actualLines.forEach(l => {
     if (l.kind !== 'expense') return;
     if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
-    // An archived source's budget file is skipped by the crawl (readStatusFolder_),
+    // An archived source's budget file is skipped by the crawl (collectStatusFolder_),
     // so keeping its actuals guaranteed a mismatch: spend with no budget beside it,
     // inflating org actuals and making the whole organisation look overspent.
     // buildTimeline_ already filtered both, so the two views disagreed.

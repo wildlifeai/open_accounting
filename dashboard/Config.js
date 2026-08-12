@@ -125,7 +125,15 @@ const CONFIG = {
   // Script Properties). The file id is kept in a Script Property.
   SNAPSHOT_FILE_NAME: 'cockpit_snapshot.json',
   SNAPSHOT_FILE_ID_PROPERTY: 'COCKPIT_SNAPSHOT_FILE_ID',
-  REFRESH_TRIGGER_HOURS: 6
+  REFRESH_TRIGGER_HOURS: 6,
+
+  // ---- Refresh progress ---------------------------------------------------
+  // Apps Script cannot stream to a client, so refreshSnapshot writes its current phase
+  // here and the browser polls apiRefreshProgress for it. CacheService rather than
+  // PropertiesService: transient, written many times per refresh, and it must not
+  // outlive a crashed run. The TTL is the backstop for a run that dies without clearing.
+  PROGRESS_CACHE_KEY: 'COCKPIT_REFRESH_PROGRESS',
+  PROGRESS_CACHE_TTL_SECONDS: 600
 };
 
 /** Settings spreadsheet id from Config or Script Property. */
