@@ -54,6 +54,7 @@ Amount secured           | 50000                  |
 Decision date            |                        |
 Owner                    | someone@wildlife.ai    |
 Last reviewed            | 01/Jul/26              |
+Link                     | https://drive.googl... |
 Notes                    | Illustrative only      |
                          |                        |
 Description | Start | End | Cost | Income | Contribution | Milestone | Xero Inventory Item | Project | Comments
@@ -78,6 +79,7 @@ amounts, rates, funder terms or invoice identifiers into it.**
 | `Amount secured` | proposed: `0` | GST-exclusive total confirmed. |
 | `Decision date` | proposed only | When the funder decides. Blank for secured. Funders ask for this on application forms. |
 | `Owner` | yes | Email of whoever maintains this sheet. Health checks are addressed to this person. |
+| `Link` | recommended | Drive URL of the grant folder, or of the contract or funding agreement. What the budget is accountable to, one click from the budget itself. Read into metadata but not yet surfaced anywhere in the cockpit. |
 | `Last reviewed` | yes | Date last checked against reality. Staleness is otherwise invisible. |
 | `Notes` | no | Free text. Not parsed — never put a number here that something else needs. |
 
