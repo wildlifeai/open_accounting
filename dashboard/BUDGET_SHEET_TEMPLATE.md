@@ -1,48 +1,68 @@
 # Funding-source budget sheet — template and contract
 
+> **Creating or updating a sheet?** Start from
+> [`budget_templates/Budget_sheet_template.xlsx`](../budget_templates/Budget_sheet_template.xlsx)
+> rather than transcribing the tables below. One import gives you all four tabs, correctly named,
+> with the formulas and dropdowns already wired. This document is the reference for what every
+> field means and how each one fails.
+
 Every funding source has one Google Sheet in the Budgets Drive, named **exactly** as its Xero
 *Funding source* tracking value (e.g. `WW_25_TOI`), living in its project's `secured/` or
 `proposed/` folder.
 
-**At most two tabs:**
+**At most four tabs:**
 
 | Tab | Role |
 |---|---|
+| `Funding_info` | sheet-level metadata as `key \| value` rows in columns A and B. |
 | `Budget` | the live baseline the cockpit reads. Change only for a genuine re-budget. |
+| `Forecast` | per-quarter overrides, where you know something the budget does not. Optional. |
 | `Submitted_budget` | frozen record of what the funder was actually given. Never edited. |
 
-Nothing else. Actuals come live from Xero; forecasts live in the central Cockpit Forecast sheet.
-A per-sheet copy of either is a second version of the truth and will drift.
+Nothing else. Actuals come live from Xero, so a per-sheet copy of them is a second version of the
+truth and will drift.
 
 ---
 
+## Where metadata lives
+
+Preferred: its own **`Funding_info`** tab, `key | value` in columns A and B, read by
+`parseFundingInfoTab_`. Rows with an empty column B - the tab title, a legend, a section heading -
+are skipped, so the tab can be laid out for humans.
+
+Still supported: the same `key | value` pairs as a block **above** the `Budget` column header row,
+which `parseBudgetFile_` reads as a fallback. Where both exist, `Funding_info` wins.
+
 ## `Budget` tab layout
 
-A metadata block, one blank row, then the column header row, then the budget lines. Keys go in
-column **A**, values in column **B**.
+With metadata on its own tab the header row is simply row 1. The example below shows the fallback
+layout - a metadata block, one blank row, then the column header row, then the budget lines - since
+the parser locates the header row either way.
 
 ```
 A                        | B                      | C ...
 -------------------------|------------------------|--------
-Funding source           | WW_25_TOI              |
+Funding source           | XXX_27_EXAMPLE         |
 Project                  | Wildlife Watcher       |
-Funder                   | Toi Foundation         |
+Funder                   | Example Funder Trust   |
 Status                   | secured                |
-Funding start            | 10/Aug/25              |
-Funding end              | 10/Dec/26              |
+Funding start            | 01/Jul/26              |
+Funding end              | 30/Jun/27              |
 Contribution policy      | percent_of_income:40   |
-Amount requested         | 143436                 |
-Amount secured           | 143436                 |
-Decision date            | 2025-08-01             |
-Owner                    | victor@wildlife.ai     |
-Last reviewed            | 2026-08-11             |
-Notes                    | Core roles to Dec 26   |
+Amount requested         | 50000                  |
+Amount secured           | 50000                  |
+Decision date            |                        |
+Owner                    | someone@wildlife.ai    |
+Last reviewed            | 01/Jul/26              |
+Notes                    | Illustrative only      |
                          |                        |
-Description | Start | End | Cost | Income | Contribution | *Account | Milestone | Xero Inventory Item | Project | Comments
-General management 0.2 FTE | 03/Nov/25 | 02/Aug/26 | 23101 | 0 | 0 | Salaries (477) | General management | WW_25_TOI_002 | General | 2.3k monthly for GM
-Product management 0.4 FTE | 05/Jan/26 | 10/Jan/27 | 53571 | 0 | 0 | Salaries (477) | Product management | WW_25_TOI_003 |  |
-Toi grant income           | 10/Aug/25 | 10/Dec/26 | 0 | 143436 | 57374 | Project Contract Income (181) | Grant income | WW_25_TOI_006 |  | 40% contributes to General
+Description | Start | End | Cost | Income | Contribution | Milestone | Xero Inventory Item | Project | Comments
+Delivery lead 0.2 FTE | 01/Jul/26 | 30/Jun/27 | 18000 | 30000 | 12000 | Delivery | XXX_27_EXAMPLE_001 | | invented figures
+Product management    | 01/Jul/26 | 30/Jun/27 | 12000 | 20000 | 8000  | Product | XXX_27_EXAMPLE_002 | General | invented figures
 ```
+
+All numbers in this document are invented. **This is a public repository — never paste real grant
+amounts, rates, funder terms or invoice identifiers into it.**
 
 ## Metadata fields
 
@@ -83,16 +103,81 @@ General budget should be deleted. They are a hand-maintained duplicate of a deri
 | `Start`, `End` | **yes** | A line with either unparseable is **silently skipped**. Use `DD/MMM/YY`. Check the year: `30/Jun/01` parses as 2001. |
 | `Cost` | **yes** | GST-exclusive. Use `0`, not blank. |
 | `Income` | yes | GST-exclusive. A line where `Cost` and `Income` are both `0` is **silently skipped**. |
-| `Contribution` | yes | `Income − Cost`; the margin funding General. Already inside `Income`, so never counted twice. |
-| `*Account` | yes | Xero chart-of-accounts label exactly as `Name (code)`, e.g. `Salaries (477)`. |
-| `Milestone` | yes | Human milestone name. |
+| `Contribution` | optional | `Income − Cost`; the margin funding General. **Derived when the column is absent.** The template carries it as a formula so the number is visible. |
+| `*Account` | omitted | Not in the template — nothing reads it. See below. |
+| `Milestone` | **yes** | The grouping key for the Overview breakdown, the tracking-grid row label, and a filter dimension. Blank collapses the source into one `(unassigned)` group. |
 | `Xero Inventory Item` | yes | The `{SOURCE}_{NNN}` product/service code, e.g. `WW_25_TOI_002`. This is the milestone dimension; without it a line falls out of the quarterly tracking grid. |
 | `Project` | yes (column) | Per-line override. Blank means "use the `Project` metadata value". The column must exist even if every cell is blank. |
 | `Comments` | no | Not parsed. |
 
-Two columns are marked required-by-contract rather than required-by-parser: `*Account` and
-`Xero Inventory Item` are technically optional to `BudgetReader`, but account-level P&L and
-milestone tracking both break without them. Treat them as mandatory.
+## Budget at milestone level (decided 2026-08-11)
+
+**Do not itemise a budget by Xero account.** Budget at milestone level, and split a milestone into
+several rows only where that helps you think — by role, by phase — with every row carrying the same
+`Xero Inventory Item`.
+
+| Column | Status in the template |
+|---|---|
+| `*Account` | **Omitted.** Nothing in the code reads a budget line's account — the only `.account` reads anywhere are in a `WebApp.js` diagnostic over *actuals*. Health check A5 asked for it and has been retired. |
+| `Contribution` | **Included as a formula** (`=Income−Cost`) so the number is visible, but the column is optional: the dashboard derives the same value when it is absent. |
+| `Description` | **Included.** Read by nothing, but useful for the human detail when a milestone is split across rows — the template uses it for roles (Data Scientist, Project Manager). Just remember `Milestone` is the column that actually groups. |
+
+The consequence to accept: budget-versus-actual is available at milestone level, not account level.
+Actuals still carry their account codes from Xero, so an actual-only P&L by account remains
+possible — you just cannot compare it against a budget that was never split that way.
+
+**`Milestone` is the column that must be filled.** It is the grouping key for the Overview
+breakdown (`project||source||milestone`, `Aggregator.js:76`), the row label in the tracking grid,
+and one of the filter dimensions. Leave it blank and every line in that source collapses into a
+single `(unassigned)` group. `Description`, by contrast, is decorative — so if you were going to
+fill only one of the two, fill `Milestone`.
+
+The minimum viable `Budget` tab is therefore: `Milestone`, `Xero Inventory Item`, `Start`, `End`,
+`Cost`, plus `Income` wherever the source has any, plus `Project` where a line belongs elsewhere.
+
+## `Forecast` tab
+
+Optional, and only worth creating when you need to override the budget. **A quarter with no entry
+here falls back to the budget baseline**, so an empty or absent `Forecast` tab is a valid state —
+it means "the budget is still our best estimate". Record a forecast when you know something the
+budget does not: a delayed hire, a grant ending early, a re-profiled milestone.
+
+Layout, as parsed by `BudgetReader.parseForecastTab_`:
+
+```
+A                              | B                     | C                     | D
+-------------------------------|-----------------------|-----------------------|----------
+Revenue                        | Jul-Sep 26 Forecast   | Oct-Dec 26 Forecast   | Comments
+WW_25_TOI_006 - Grant income   | 35000                 | 35000                 |
+                               |                       |                       |
+Expenses                       | Jul-Sep 26 Forecast   | Oct-Dec 26 Forecast   | Comments
+WW_25_TOI_002 - General mgmt   | 7108                  | 0                     | GM role vacant from Oct
+WW_25_TOI_003 - Admin & Comms  | 2390                  | 0                     | comms advisor departed
+                               |                       |                       |
+Funding Source Details         |                       |                       |
+```
+
+Rules that are easy to get wrong:
+
+- Section headers in column A must read exactly `Revenue` or `Expenses`. Rows before the first
+  section header are ignored.
+- **Quarter column headers must match `MMM-MMM YY Forecast` exactly** — e.g. `Jul-Sep 26 Forecast`.
+  Anything else is silently ignored, so a typo in one heading quietly discards that quarter's
+  forecast with no error. Health check **A7** exists for this.
+- The template generates them with a formula anchored on `Funding_info!Funding start`, so nobody
+  types a year. Do **not** re-anchor that formula on `TODAY()`: the header would then relabel itself
+  each quarter while the figure beneath it stayed put, applying every forecast to the wrong quarter.
+  The parser reads the computed value, so a formula header is fine.
+- Column A rows under a section must be `CODE - Name`, where `CODE` is the `Xero Inventory Item`
+  from the `Budget` tab. A row whose code cannot be parsed is skipped.
+- Blank rows and rows whose column A starts with `Total` are skipped.
+- Parsing **stops entirely** at a column-A value of `Funding Source Details`. Anything below that
+  line is invisible, which makes it a useful place for working notes.
+- Each section can carry its own quarter columns; they are re-read per section header.
+- A `Comments` column (header exactly `Comments`) attaches one free-text note per milestone,
+  surfaced in the tracking grid. Use it to say *why* a forecast differs from the budget.
+
+Forecast values are per quarter, not per month, and are absolute amounts rather than adjustments.
 
 ## Common failures
 

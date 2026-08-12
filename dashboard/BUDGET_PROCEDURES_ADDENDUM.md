@@ -52,12 +52,17 @@ and its "Xero Sync" are retired.** Replace the Maintain procedure body with the 
 > right *Projects* tag, *Funding source* tag, and product/service item. The dashboard
 > refreshes every ~6 hours, or immediately with **Refresh now**.
 
-**Phase 2: Update the forecast (now in the dashboard, not the sheet)**
-> Forecasting happens on the dashboard's **Quarterly tracking** tab. Past quarters show
-> actual spend automatically; current and future quarters are editable forecast cells that
-> start at the budget baseline. Each quarter, review actuals with the GM and adjust the
-> forward forecast per milestone. Edits save to one central Forecast sheet - there is no
-> longer a forecast section to maintain inside each funding-source Gsheet.
+**Phase 2: Update the forecast (in the funding source's own `Forecast` tab)**
+> SUPERSEDED as of 2026-08-11. Forecasts are **not** held centrally. The central sheet is
+> *Cockpit Settings* (Permissions only); each funding source carries its own `Forecast` tab,
+> read by `BudgetReader.parseForecastTab_` on every refresh. See
+> [BUDGET_SHEET_TEMPLATE.md](BUDGET_SHEET_TEMPLATE.md) for its exact layout.
+>
+> There is no quarterly data-entry obligation: a quarter with no `Forecast` entry falls back to
+> the budget baseline. Record an override only when you know something the budget does not — a
+> delayed hire, a grant ending early, a re-profiled milestone — and use the `Comments` column to
+> say why. The dashboard's **Quarterly tracking** tab shows actuals for past quarters, the
+> override where one exists, and the baseline everywhere else.
 
 **What stays the same**
 > The `Budget` tab remains the **frozen baseline** (the approved plan). Only change it for a

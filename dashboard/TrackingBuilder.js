@@ -49,11 +49,16 @@ function composeTracking(entity, currentQi, measure) {
       const baseline = L.base[q] || 0;
       const actual = L.act[q] || 0;
       const hasForecast = L.fc[q] !== undefined;
-      const forecast = hasForecast ? L.fc[q] : 0;
+      // No entry in the funding source's Forecast tab means the budget baseline
+      // carries forward. A forecast is an exception you record when you know
+      // something the budget does not - not mandatory quarterly data entry.
+      // Reading 0 here made every source with an unmaintained Forecast tab appear
+      // certain to underspend, and silently understated org-wide expected spend.
+      const forecast = hasForecast ? L.fc[q] : baseline;
       const isCurrent = col.qi === currentQi;
       // Past quarters: effective = actual
       // Current quarter: effective = actual (partial, still accumulating)
-      // Future quarters: effective = forecast from gsheet (0 if no forecast)
+      // Future quarters: effective = the Forecast-tab override, else the baseline
       const effective = col.past ? actual : (isCurrent ? actual : forecast);
       return { type: 'quarter', baseline: Math.round(baseline), actual: Math.round(actual),
         forecast: Math.round(forecast), hasForecast: hasForecast,

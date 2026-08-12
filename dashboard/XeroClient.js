@@ -151,7 +151,59 @@ function fetchXeroActuals(sinceDate) {
 
   lines.push.apply(lines, fetchBankTransactionLines_(modifiedHeader));
   lines.push.apply(lines, fetchInvoiceLines_(modifiedHeader));
-  return lines;
+
+  // Apply the balance-sheet exclusions in ONE place so every present and future
+  // fetcher inherits it. Filtering downstream in Aggregator would mean touching
+  // both the rollup loop and buildTracking_, and leaving the next consumer to
+  // remember.
+  const kept = [];
+  let count = 0, total = 0;
+  lines.forEach(l => {
+    if (isExcludedAccount_(l.account)) { count++; total += Number(l.amount) || 0; return; }
+    kept.push(l);
+  });
+  _lastExclusion = { count: count, total: Math.round(total) };
+  if (count) {
+    Logger.log('Excluded ' + count + ' actual line(s) on balance-sheet accounts, total ' +
+      Math.round(total));
+  }
+  return kept;
+}
+
+// ---- Balance-sheet exclusions ---------------------------------------------
+// CONFIG.EXCLUDED_ACCOUNTS lists balance-sheet and non-operational accounts that
+// must never count as spend - notably the Wages Payable and PAYE Payable legs of
+// a payroll settlement. The list was declared but read by nothing, so those lines
+// counted as expense whenever they happened to carry a Projects tracking tag. The
+// de facto filter on actuals was "does this line have a Projects value", which is
+// a data-entry accident rather than a control.
+//
+// Match on the account CODE, not the label: labels are built from live Xero
+// account names by accountLabelFromCode_, so renaming an account in Xero would
+// otherwise silently un-exclude it.
+
+let _excludedCodes = null;
+let _lastExclusion = { count: 0, total: 0 };
+
+/** What the last fetch excluded, for the Health panel. */
+function lastExclusionSummary() { return _lastExclusion; }
+
+function excludedCodes_() {
+  if (!_excludedCodes) {
+    _excludedCodes = {};
+    (CONFIG.EXCLUDED_ACCOUNTS || []).forEach(label => {
+      const m = /\((\d+)\)\s*$/.exec(String(label));
+      if (m) _excludedCodes[m[1]] = label;
+      else Logger.log('EXCLUDED_ACCOUNTS entry has no "(code)" so is ignored: ' + label);
+    });
+  }
+  return _excludedCodes;
+}
+
+/** True when a normalised line sits on an excluded balance-sheet account. */
+function isExcludedAccount_(accountLabel) {
+  const m = /\((\d+)\)\s*$/.exec(String(accountLabel == null ? '' : accountLabel));
+  return m ? Object.prototype.hasOwnProperty.call(excludedCodes_(), m[1]) : false;
 }
 
 /** Paginate a Xero endpoint and flatten line items via `mapper`. */

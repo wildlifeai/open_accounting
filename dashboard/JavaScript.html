@@ -44,8 +44,46 @@
     buildFilters();
     renderBreakdown();
 
-    document.getElementById('flags').innerHTML =
-      s.dataFlags.map(function (f) { return '<div>⚠ ' + esc(f) + '</div>'; }).join('');
+    renderHealth(s.health || []);
+  }
+
+  // Health findings: what is wrong, where, and what to do about it. Sorted by
+  // severity then by value at risk, so a large misattribution outranks a missing
+  // description. See dashboard/HEALTH_CHECKS.md.
+  function renderHealth(health) {
+    var el = document.getElementById('flags');
+    if (!health.length) { el.innerHTML = ''; return; }
+
+    var counts = { error: 0, warning: 0, info: 0 };
+    health.forEach(function (f) { counts[f.severity] = (counts[f.severity] || 0) + 1; });
+    var parts = [];
+    if (counts.error) parts.push('<b>' + counts.error + (counts.error === 1 ? ' error' : ' errors') + '</b>');
+    if (counts.warning) parts.push(counts.warning + (counts.warning === 1 ? ' warning' : ' warnings'));
+    if (counts.info) parts.push(counts.info + ' info');
+    var html = '<div class="health-sum">Health: ' + parts.join(' · ') + '</div>';
+
+    health.forEach(function (f) {
+      if (f.severity === 'info') return;
+      var where = [];
+      if (f.fundingSource) where.push(f.fundingSource);
+      if (f.row) where.push('row ' + f.row);
+      html += '<div class="health-row health-' + esc(f.severity) + '">' +
+        '<span class="health-title">' + esc(f.title) + '</span>' +
+        (where.length ? '<span class="health-where">' + esc(where.join(' · ')) + '</span>' : '') +
+        (f.amount ? '<span class="health-amt">' + fmtMoney(f.amount) + '</span>' : '') +
+        (f.detail ? '<div class="health-detail">' + esc(f.detail) + '</div>' : '') +
+        (f.action ? '<div class="health-action">' + esc(f.action) + '</div>' : '') +
+        (f.link ? '<div><a class="health-link" target="_blank" rel="noopener" href="' +
+          esc(f.link) + '">open sheet</a></div>' : '') +
+        '</div>';
+    });
+
+    health.forEach(function (f) {
+      if (f.severity === 'info' && f.detail) {
+        html += '<div class="health-info">' + esc(f.detail) + '</div>';
+      }
+    });
+    el.innerHTML = html;
   }
 
   var DIM_LABEL = { project: 'Project', fundingSource: 'Funding source', status: 'Status', milestone: 'Milestone' };
@@ -447,10 +485,16 @@
             '<span class="cell-actual">' + money0(c.actual) + '</span>' +
             '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
         }
-        // Future: forecast from gsheet (main), or dash if no forecast
-        var mainVal = c.hasForecast ? money0(c.forecast) : '<span class="no-fc">—</span>';
+        // Future: the Forecast-tab override when present, otherwise the budget
+        // baseline — which is what counts toward Expected. A dash here used to
+        // imply the cell contributed nothing, which was never true.
+        if (!c.hasForecast) {
+          return '<td class="' + cls.trim() + '"><div class="cell-q">' +
+            '<span class="no-fc">' + money0(c.baseline) + '</span>' +
+            '<span class="cell-base">budget, no override</span></div></td>';
+        }
         return '<td class="' + cls.trim() + '"><div class="cell-q">' +
-          '<span class="cell-actual">' + mainVal + '</span>' +
+          '<span class="cell-actual">' + money0(c.forecast) + '</span>' +
           '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
       }).join('');
 

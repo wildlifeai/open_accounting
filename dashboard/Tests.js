@@ -45,24 +45,114 @@ function runTests() {
   check('bucketToQuarters next FY Q1', qb['26/27 Q1'] === 30);
   check('quarterSortNum order', quarterSortNum('26/27 Q1') > quarterSortNum('25/26 Q4'));
 
+  // Budget tab: the column header row is located, not assumed, so a key|value
+  // metadata block can sit above it (see BUDGET_SHEET_TEMPLATE.md).
+  var sheetRows = [
+    ['Funding source', 'WW_25_TOI'],
+    ['Status', 'secured'],
+    ['Contribution policy', 'percent_of_income:40'],
+    [],
+    ['Description', 'Start', 'End', 'Cost', 'Income', 'Milestone'],
+    ['Delivery lead', '03/Nov/25', '02/Aug/26', 20000, 0, 'Delivery']
+  ];
+  check('header row located below metadata block', findHeaderRow_(sheetRows) === 4);
+  check('header row is 0 when there is no metadata block',
+    findHeaderRow_([['Description', 'Start', 'End', 'Cost']]) === 0);
+  check('no header row returns -1', findHeaderRow_([['Notes', 'x'], ['more', 'y']]) === -1);
+
+  var meta = readMetadataBlock_(sheetRows, 4);
+  check('metadata keys are lower-cased', meta['funding source'] === 'WW_25_TOI');
+  check('metadata carries contribution policy',
+    meta['contribution policy'] === 'percent_of_income:40');
+  check('metadata stops at the header row', meta['description'] === undefined);
+  check('isoDate_ zero-pads', isoDate_(new Date(2026, 5, 3)) === '2026-06-03');
+
+  // Balance-sheet exclusions match on account code, not label, so renaming an
+  // account in Xero cannot silently un-exclude it.
+  check('excludes Wages Payable', isExcludedAccount_('Wages Payable - Payroll (814)'));
+  check('excludes PAYE Payable', isExcludedAccount_('PAYE Payable (825)'));
+  check('excludes after a Xero rename', isExcludedAccount_('Renamed In Xero (814)'));
+  check('keeps Salaries', !isExcludedAccount_('Salaries (477)'));
+  check('keeps an untagged/blank account', !isExcludedAccount_(''));
+  check('keeps an unknown code', !isExcludedAccount_('Something New (999)'));
+
+  // Health findings: severity order, value at risk, and the checks the reader
+  // cannot make for itself. See dashboard/HEALTH_CHECKS.md.
+  var hBudgets = [{
+    name: 'WW_25_TOI', status: 'secured', projectFolder: 'Wildlife Watcher', sheetUrl: '',
+    metadata: { owner: 'victor@wildlife.ai' },
+    tabs: ['Budget', 'Forecast', 'Xero export'],
+    lines: [{ item: 'WW_25_TOI_002', cost: 100, income: 0, contribution: 0 },
+            { item: '', cost: 5000, income: 0, contribution: 0 }],
+    forecast: { cost: { 'WW_25_TOI_099||26/27 Q1': 50 }, income: {}, comments: {} },
+    issues: [{ check: 'B4', detail: '1 line without an item code' },
+             { check: 'A1', detail: 'missing column Cost' }]
+  }];
+  var hActuals = [{ kind: 'expense', project: '', fundingSource: '', amount: 4053 },
+                  { kind: 'expense', project: 'General', fundingSource: '', amount: 200 }];
+  var health = buildHealth(hBudgets, hActuals,
+    { xeroConnected: false, exclusion: { count: 3, total: 3090 }, secretsMissing: [] });
+  var hIds = health.map(function (f) { return f.id; });
+
+  check('missing column reported as A2, not A1', hIds.indexOf('A2') !== -1);
+  check('A3 flags a tab outside the three allowed', hIds.indexOf('A3') !== -1);
+  check('A6 flags the missing Submitted_budget tab', hIds.indexOf('A6') !== -1);
+  check('A9 flags a forecast for a milestone not in the budget', hIds.indexOf('A9') !== -1);
+  check('B4 carries value at risk, not just a count',
+    health.some(function (f) { return f.id === 'B4' && f.amount === 5000; }));
+  check('D1 counts only untagged expense',
+    health.some(function (f) { return f.id === 'D1' && f.amount === 4053; }));
+  check('D2 does not double-count the D1 line',
+    health.some(function (f) { return f.id === 'D2' && f.amount === 200; }));
+  check('F1 raised when Xero is disconnected', hIds.indexOf('F1') !== -1);
+  check('errors sort before warnings before info', (function () {
+    var rank = { error: 0, warning: 1, info: 2 };
+    for (var i = 1; i < health.length; i++) {
+      if (rank[health[i].severity] < rank[health[i - 1].severity]) return false;
+    }
+    return true;
+  })());
+  check('owner carried through from sheet metadata',
+    health.some(function (f) { return f.owner === 'victor@wildlife.ai'; }));
+  check('legacy dataFlags strings exclude info findings',
+    healthToFlags(health).length === health.filter(function (f) {
+      return f.severity !== 'info'; }).length);
+
   // Forecast merge with FY columns: aggregate 'Up to last FY' + this FY quarters.
+  // Forecast overrides live on the milestone itself, read from each funding
+  // source's own Forecast tab by BudgetReader.parseForecastTab_.
   var entity = {
     id: 'WW_25_TOI', label: 'WW_25_TOI', type: 'source', source: 'WW_25_TOI',
     status: 'secured', project: 'Wildlife Watcher',
     milestones: [{ item: 'WW_25_TOI_002', milestone: 'General management', source: 'WW_25_TOI',
-      baseline: { '25/26 Q3': 4992, '25/26 Q4': 7615, '26/27 Q1': 7703, '26/27 Q2': 2792 },
-      actual: { '25/26 Q3': 2000, '25/26 Q4': 2500 } }]
+      baseline: { '25/26 Q3': 4992, '25/26 Q4': 7615,
+        '26/27 Q1': 7703, '26/27 Q2': 2792, '26/27 Q3': 1000 },
+      actual: { '25/26 Q3': 2000, '25/26 Q4': 2500 },
+      costForecast: { '26/27 Q2': 5000 },   // override on one future quarter only
+      forecastComment: 'staffing ramp' }]
   };
-  var fmap = { amounts: { 'WW_25_TOI||WW_25_TOI_002||26/27 Q1': { cost: 5000 } },
-    comments: { 'WW_25_TOI||WW_25_TOI_002': 'staffing ramp' } };
-  var grid = composeTracking(entity, fmap, quarterSortNum('26/27 Q1'));
+  var grid = composeTracking(entity, quarterSortNum('26/27 Q1'), 'cost');
   var m = grid.milestones[0];
+
+  // Look columns up by label - index arithmetic is brittle as columns evolve.
+  function cellFor(label) {
+    for (var i = 0; i < grid.columns.length; i++) {
+      if (grid.columns[i].label === label) return m.cells[i];
+    }
+    return null;
+  }
+
   check('first column is aggregate', grid.columns[0].type === 'aggregate');
   check('aggregate sums prior FY actual', m.cells[0].effective === 4500);
-  check('current quarter uses override', m.cells[1].effective === 5000 && m.cells[1].hasOverride);
-  check('future quarter uses baseline', m.cells[2].effective === 2792);
-  check('expected = 4500+5000+2792', m.expectedTotal === 12292);
-  check('baseline total = 23102', m.baselineTotal === 23102);
+  check('future quarter uses its override', cellFor('26/27 Q2').effective === 5000
+    && cellFor('26/27 Q2').hasForecast === true);
+  // Regression guard: an unmaintained Forecast tab must fall back to the budget
+  // baseline, never to 0. Reading 0 makes a source look certain to underspend.
+  check('future quarter with no override falls back to baseline',
+    cellFor('26/27 Q3').effective === 1000 && cellFor('26/27 Q3').hasForecast === false);
+  check('current quarter uses actual, not baseline', cellFor('26/27 Q1').effective === 0);
+  check('expected = 4500 + 0 + 5000 + 1000 + 0', m.expectedTotal === 10500);
+  check('baseline total = 24102', m.baselineTotal === 24102);
   check('comment carried through', m.comment === 'staffing ramp');
 
   Logger.log(results.join('\n'));

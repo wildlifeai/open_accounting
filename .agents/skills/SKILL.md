@@ -132,15 +132,17 @@ does that properly, so the justification is gone.
 
 ## Line Ending Invariant
 
-**There is no `.gitattributes` in this repo.** clasp writes LF; a Windows checkout is CRLF. So
-after `clasp pull`, files can appear wholly modified with no content change.
+**`.gitattributes` sets `* text=auto eol=lf`,** so LF holds in both the stored blob and the working
+tree. It was added on 2026-08-11; before that, clasp wrote LF while a Windows checkout was CRLF, so
+`clasp pull` made whole files appear modified with no content change.
 
 * Use `git diff --ignore-cr-at-eol` to see real changes, and
   `git diff --ignore-cr-at-eol --numstat -- <file>` to confirm a file is line-endings-only.
 * Restore line-endings-only files rather than committing them: `git checkout -- <file>`.
 * A diff where insertions ≈ deletions ≈ the file's line count is an artifact, not an edit.
-* Adding `* text=auto eol=lf` plus `git add --renormalize .` would end this class of noise. It has
-  not been done; propose it rather than assuming it.
+* After changing `.gitattributes`, renormalise with `git add --renormalize .`.
+* Never commit a real grant amount, rate, funder term or invoice identifier — **this repository is
+  public**. Describe the shape of a problem and invent the numbers, including in test fixtures.
 
 ---
 
@@ -234,17 +236,40 @@ Rules that follow from this:
 
 # 3. Budget Sheet Contract
 
-**A funding-source spreadsheet has at most two tabs (rule set 2026-08-11):**
+**A funding-source spreadsheet has at most four tabs (rule set 2026-08-11):**
 
 | Tab | Role |
 |---|---|
+| `Funding_info` | sheet-level metadata as `key \| value` rows in columns A and B |
 | `Budget` | the live baseline the cockpit reads — the approved plan, changed only for a genuine re-budget |
+| `Forecast` | per-quarter overrides where you know something the budget does not |
 | `Submitted_budget` | frozen as-submitted record of what the funder was actually given |
+
+Start from [`budget_templates/Budget_sheet_template.xlsx`](../../budget_templates/), which carries
+all four tabs, the formulas and the dropdowns. Metadata may still appear as a block above the
+`Budget` columns — `parseBudgetFile_` reads that as a fallback — but `Funding_info` wins where both
+exist, and it is where new sheets should put it.
 
 Everything else goes: `Budget, Actual, Forecast Tracking` grids, pasted Xero transaction exports,
 milestone summaries, forecast breakdowns, income summaries, funding-tracking header blocks. Actuals
-come live from Xero and forecasts live in the central Cockpit Forecast sheet; a per-sheet copy is a
-second version of the truth.
+come live from Xero; a per-sheet copy of them is a second version of the truth.
+
+**Forecasts are per-sheet, not central.** An earlier design kept them in one central Cockpit
+Forecast sheet, and `BUDGET_PROCEDURES_ADDENDUM.md` still describes it that way — that is stale.
+`ForecastStore.js` now states plainly that "legacy forecast storage has been removed"; the central
+sheet is **Cockpit Settings**, holding only the Permissions tab, and forecasts are read from each
+funding source's own `Forecast` tab by `BudgetReader.parseForecastTab_`.
+
+**A missing forecast falls back to the budget baseline.** `TrackingBuilder` treats a quarter with
+no `Forecast` entry as the baseline, not as zero, so an unmaintained `Forecast` tab does not make a
+source appear certain to underspend. That fallback is the difference between a forecast being an
+exception you record and mandatory quarterly data entry across ~30 sheets; it was the original
+tested behaviour, was lost in the per-sheet rewrite, and was restored on 2026-08-11 with a
+regression test in `Tests.js`. Do not "simplify" it back to `0`.
+
+Note the **current** quarter deliberately shows actual-to-date rather than the forecast, so mid-
+quarter it understates that column, and with it annual Expected. Whether it should instead be
+actual plus the remainder of the forecast is an open question.
 
 Three consequences to handle rather than discover:
 
@@ -362,12 +387,17 @@ attribution must move funders mid-quarter. That transition is the first real tes
 Verified against the deployed code on 2026-08-11. Do not "discover" these again; do not assume
 they are fixed.
 
-* **`EXCLUDED_ACCOUNTS` is dead configuration.** Declared in `dashboard/Config.js`, read by zero
-  executable lines. Same for `OVERHEAD_ACCOUNT`, `REVENUE_ACCOUNTS`, `DEFERRED_ACCOUNT`.
-  `normaliseLine_` populates `account` on every line and nothing downstream reads it. The de facto
-  filter on actuals is "does this line carry a `Projects` value" — a data-entry accident, not a
-  control. Wire it up as its own isolated change, match on account **code** not label (labels come
-  from live Xero names and a rename would silently un-exclude), then diff the totals.
+* **`EXCLUDED_ACCOUNTS` — fixed 2026-08-11, but the totals move on first deploy.** It was declared
+  in `dashboard/Config.js` and read by zero executable lines, so the de facto filter on actuals was
+  "does this line carry a `Projects` value" — a data-entry accident rather than a control, and the
+  Wages Payable and PAYE Payable legs of a payroll settlement counted as spend whenever they
+  happened to be tagged. `isExcludedAccount_` now filters inside `fetchXeroActuals`, in one place so
+  every fetcher inherits it, matching on account **code** rather than label so a Xero rename cannot
+  silently un-exclude. `lastExclusionSummary()` reports what was dropped. **Expect published spend
+  figures to fall when this first deploys** — that is the miscounting being removed, not a
+  regression, so capture the before/after.
+* **`OVERHEAD_ACCOUNT`, `REVENUE_ACCOUNTS` and `DEFERRED_ACCOUNT` are still dead configuration** —
+  declared, never read.
 * **Payroll manual journals are not fetched** (§4).
 * **The invoice fetcher counts DRAFT and SUBMITTED invoices** as actuals — it excludes only
   DELETED and VOIDED.
@@ -405,6 +435,10 @@ they are fixed.
 
 # 6. Overhead and Double-Funding Rules
 
+> **This is a public repository.** Never paste real grant amounts, hourly rates, funder terms or
+> invoice identifiers into tracked files, including examples and test fixtures. Describe the shape
+> of a problem and invent the numbers.
+
 ## Overhead / General contribution
 
 Projects contribute a share of income to `General` — Spyfish 40% by default, `WW_26_SALES` 40%,
@@ -425,13 +459,13 @@ negative-cost lines. Until then, treat any overhead figure as hand-maintained an
 The same cost must not be charged to two funding sources for the same period. Signals found on
 2026-08-11 that need resolving, not repeating:
 
-* `WW_25_TOI_002` "General management" is budgeted $37,310 inside the Wildlife Watcher Toi grant,
-  and 100% of its salary actuals are tracked to `Projects: General` — while General secured also
-  budgets General management.
+* `WW_25_TOI_002` "General management" is budgeted inside the Wildlife Watcher Toi grant, and
+  100% of its salary actuals are tracked to `Projects: General` — while General secured *also*
+  budgets General management. (Amounts deliberately omitted: public repository.)
 * General management 0.2 FTE appears in two sheets with a one-month date overlap; WW Product
   Management overlaps ~3 months at a combined 1.0 FTE; a third sheet budgets the same GM at
   1.0 FTE.
-* One invoice (`1a0607dd-…`, $52.09) appears under both `WW_25_TOI` and `WW_25_STOUT`.
+* At least one invoice appears under two funding sources at once.
 * Handoffs between funders are recorded as free text ("covered by TOI funding"), not as structure.
 
 Rule: when preparing any funding application, check whether the cost is already funded elsewhere,
