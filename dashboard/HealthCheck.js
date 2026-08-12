@@ -39,11 +39,16 @@ const HEALTH_CATALOGUE = {
     title: 'Forecast column header not recognised',
     action: 'Name it exactly "MMM-MMM YY Forecast", e.g. "Jul-Sep 26 Forecast".' },
   A8: { severity: 'warning', category: 'Sheet structure',
-    title: 'Forecast row is not a milestone',
-    action: 'Use "CODE - Name", matching the Xero Inventory Item on the Budget tab.' },
-  A9: { severity: 'info', category: 'Sheet structure',
+    title: 'Forecast row does not match a budget line',
+    action: 'Label it with the milestone, or "Description - Milestone" from the ' +
+      'Budget tab. The row\'s forecast is discarded until it resolves.' },
+  A9: { severity: 'warning', category: 'Sheet structure',
     title: 'Forecast for a milestone not in the budget',
     action: 'Either the budget line was removed, or the code is a typo.' },
+  A10: { severity: 'warning', category: 'Sheet structure',
+    title: 'Two forecast rows share one label',
+    action: 'Usually a sorted Budget tab: the label formulas now point at the ' +
+      'wrong lines. Re-point them and do not sort the Budget tab.' },
   B1: { severity: 'warning', category: 'Data quality',
     title: 'Lines skipped as empty',
     action: 'Set Cost/Income deliberately, or delete the row.' },
@@ -52,7 +57,8 @@ const HEALTH_CATALOGUE = {
     action: 'Use DD/MMM/YY. The line is ignored entirely.' },
   B3: { severity: 'error', category: 'Data quality',
     title: 'End date precedes Start date',
-    action: 'Check the year - "30/Jun/01" parses as 2001. The line is ignored.' },
+    action: 'Check the year: a two-digit year can land in the wrong century. ' +
+      'The line is ignored.' },
   B4: { severity: 'error', category: 'Data quality',
     title: 'Lines with no Xero Inventory Item',
     action: 'Add the milestone code, or these fall outside quarterly tracking.' },
@@ -136,8 +142,17 @@ function buildHealth(budgets, actualLines, ctx) {
     }
 
     // --- A9: forecast for a milestone the budget no longer has ---
+    // Compare codes with codes. This used to key on the raw Inventory Item cell,
+    // which holds "CODE - Name", while forecast keys are the bare code - so it
+    // fired on every correctly coded sheet in the org and never on a real fault.
+    // Since parseForecastTab_ now resolves labels against the Budget tab before
+    // storing them, this should be unreachable: if it ever appears, a forecast key
+    // reached the snapshot without going through resolveForecastLabel_.
     const budgetItems = {};
-    (b.lines || []).forEach(l => { if (l.item) budgetItems[l.item] = true; });
+    (b.lines || []).forEach(l => {
+      const code = itemCode_(l.item);
+      if (code) budgetItems[code] = true;
+    });
     const forecastItems = {};
     ['cost', 'income'].forEach(kind => {
       const map = (b.forecast && b.forecast[kind]) || {};

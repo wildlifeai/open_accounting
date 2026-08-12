@@ -67,8 +67,9 @@ their projects, the GM sees everything.
 | ~~A5~~ | — | ~~No `*Account` column~~ | **Retired 2026-08-11.** Budgets are set at milestone level, not per account, so its absence is expected. Nothing in the code read a budget line's account in any case. |
 | A6 | info | No `Submitted_budget` tab | No frozen record of what the funder was given. |
 | A7 | error | `Forecast` tab column header does not match `MMM-MMM YY Forecast` | That quarter's forecast is silently discarded. Name the column exactly, e.g. `Jul-Sep 26 Forecast`. |
-| A8 | warning | `Forecast` tab row whose column A is not a parseable `CODE - Name` | That row is skipped. Match the `Xero Inventory Item` from the `Budget` tab. |
-| A9 | info | `Forecast` entry for an item code absent from the `Budget` tab | Forecasting a milestone that no longer exists. |
+| A8 | warning | `Forecast` tab row whose column A resolves to no budget line, or to more than one | That row's forecast is discarded. Label it with the milestone, or `Description - Milestone`. |
+| A9 | warning | `Forecast` entry for an item code absent from the `Budget` tab | Forecasting a milestone that no longer exists. Should now be unreachable, since labels are resolved against the `Budget` tab at read time; if it appears, a forecast key reached the snapshot without passing `resolveForecastLabel_`. |
+| A10 | warning | Two `Forecast` rows in one section carry the same label | Usually a sorted `Budget` tab: the label formulas held their positions while the values moved underneath them. Amounts are still summed, so nothing is lost, but other lines have silently lost their forecast. |
 
 A missing or empty `Forecast` tab is **not** a finding — a quarter with no override falls back to
 the budget baseline, so an absent tab legitimately means "the budget is still our best estimate".
