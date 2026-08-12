@@ -74,7 +74,9 @@ function readStatusFolder_(projectFolder, subName, status, out) {
       const info = parseFundingInfoTab_(ss);
       if (info) Object.keys(info).forEach(k => { entry.metadata[k] = info[k]; });
 
-      const forecast = parseForecastTab_(ss);
+      // Budget lines are passed in so Forecast row labels can be resolved against
+      // them. Order matters: the Budget tab must be parsed first.
+      const forecast = parseForecastTab_(ss, parsed.lines);
       entry.forecast = forecast.data;
       entry.issues = entry.issues.concat(forecast.issues);
     } catch (e) {
@@ -274,12 +276,98 @@ function parseSheetDate_(value) {
 // ---- Forecast tab reader --------------------------------------------------
 
 /**
- * Read the "Forecast" tab from a funding source spreadsheet.
- * Returns { data: { cost, income, comments }, sheetUrl }.
- * The Forecast tab has Revenue and Expenses sections with item codes in column A
- * and quarter forecasts in subsequent columns. Stops at "Funding Source Details".
+ * Lowercase, collapse internal whitespace, trim. A stray double space typed into
+ * one tab must not stop a label matching the same words in another.
  */
-function parseForecastTab_(ss) {
+function normaliseLabel_(value) {
+  return String(value == null ? '' : value).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * Build the map that lets the Forecast tab name budget lines in words a human
+ * reads, rather than in item codes nobody wants to type.
+ *
+ * Every label form below points at the same item code, so any of them may appear
+ * in Forecast column A:
+ *
+ *   the whole Inventory Item cell   "SPY_26_UOA_001 - Baseline model assessment"
+ *   the bare item code              "SPY_26_UOA_001"
+ *   the milestone                   "Baseline model assessment and data ingestion"
+ *   description + " - " + milestone "Data Scientist - Baseline model assessment..."
+ *   the description alone           "Data Scientist"
+ *
+ * Labels are matched whole and never split, so a description containing " - "
+ * cannot be mis-parsed, and the composite form built by
+ * `=Budget!A2 & " - " & Budget!G2` resolves even though its first segment is a
+ * description rather than a code.
+ *
+ * A label pointing at more than one distinct item code is ambiguous. One
+ * milestone spanning several accounts is not ambiguous: those lines share a code,
+ * so the set collapses to one. Two milestones do not, and "Data Scientist"
+ * appearing under both is reported rather than guessed at.
+ */
+function buildForecastLabelMap_(lines) {
+  const map = {};
+  function put(label, code) {
+    const key = normaliseLabel_(label);
+    if (!key || !code) return;
+    if (!map[key]) map[key] = {};
+    map[key][code] = true;
+  }
+  (lines || []).forEach(l => {
+    const code = itemCode_(l.item);
+    if (!code) return; // no code, nothing a forecast could attach to. B4 reports it.
+    put(l.item, code);
+    put(code, code);
+    if (l.milestone) {
+      put(l.milestone, code);
+      if (l.description) put(l.description + ' - ' + l.milestone, code);
+    }
+    if (l.description) put(l.description, code);
+  });
+  return map;
+}
+
+/**
+ * Resolve a Forecast column A cell to exactly one item code.
+ * Returns { code } or { error } saying why not, never a guess.
+ */
+function resolveForecastLabel_(cellA, labelMap) {
+  function lookup(label) {
+    const hit = labelMap[normaliseLabel_(label)];
+    return hit ? Object.keys(hit).sort() : [];
+  }
+  // Whole string first. This is what makes the composite label work: splitting it
+  // would reduce "Data Scientist - <milestone>" back to an ambiguous description.
+  let codes = lookup(cellA);
+  if (codes.length === 1) return { code: codes[0] };
+  if (codes.length > 1) {
+    return { error: 'is ambiguous, matching ' + codes.join(' and ') +
+      '. Name the milestone as well, e.g. "' + cellA + ' - <milestone>"' };
+  }
+  // Then the historic "CODE - Name" split, so sheets already carrying item codes
+  // keep working untouched.
+  const split = itemCode_(cellA);
+  codes = lookup(split);
+  if (codes.length === 1) return { code: codes[0] };
+  if (codes.length > 1) {
+    return { error: 'is ambiguous: "' + split + '" matches ' + codes.join(' and ') +
+      '. Name the milestone as well' };
+  }
+  return { error: 'matches no line on the Budget tab' };
+}
+
+/**
+ * Read the "Forecast" tab from a funding source spreadsheet.
+ * Returns { data: { cost, income, comments }, sheetUrl, issues }.
+ * The Forecast tab has Revenue and Expenses sections, a row label in column A and
+ * quarter forecasts in subsequent columns. Stops at "Funding Source Details".
+ *
+ * `budgetLines` are the already-parsed Budget tab lines. Row labels are resolved
+ * against them at read time, so every key this returns is a real item code and
+ * the rest of the system needs no knowledge of label forms.
+ */
+function parseForecastTab_(ss, budgetLines) {
   const sheetUrl = ss.getUrl();
   const sheet = ss.getSheetByName(CONFIG.FORECAST_TAB);
   const issues = [];
@@ -292,7 +380,17 @@ function parseForecastTab_(ss) {
   const data = sheet.getDataRange().getValues();
   if (!data.length) return empty;
 
+  const labelMap = buildForecastLabelMap_(budgetLines);
+  if (!Object.keys(labelMap).length) {
+    // No budget line carries an item code, so there is nothing any forecast row
+    // could attach to. One finding, not one per row - B4 already names the cause.
+    issues.push({ check: 'A8', detail: 'the Forecast tab cannot be used: no line ' +
+      'on the Budget tab has an "' + CONFIG.BUDGET_COLUMNS.item + '"' });
+    return empty;
+  }
+
   const result = { cost: {}, income: {}, comments: {} };
+  const seenLabels = {}; // 'section||label' -> row number first seen on
   var section = null; // 'revenue' | 'expenses'
   var quarterCols = []; // [{ col, label }]
   var commentCol = -1;
@@ -327,12 +425,30 @@ function parseForecastTab_(ss) {
     // Skip blank, Total, and summary rows
     if (!cellA || cellA.indexOf('Total') === 0) continue;
 
-    // Extract item code from "CODE - Name" format
-    var code = itemCode_(cellA);
-    if (!code) {
+    // Resolve the label to an item code. Anything unresolvable or ambiguous is
+    // reported against its row rather than being silently dropped, which is what
+    // used to happen to every forecast written in words instead of codes.
+    var resolved = resolveForecastLabel_(cellA, labelMap);
+    if (!resolved.code) {
       issues.push({ check: 'A8', row: i + 1, detail: 'Forecast row "' + cellA +
-        '" is not a "CODE - Name" milestone, so it is ignored' });
+        '" ' + resolved.error + ' - the row is ignored' });
       continue;
+    }
+    var code = resolved.code;
+
+    // Two rows in one section carrying the same label is the signature of a sorted
+    // Budget tab: `=Budget!A2 & " - " & Budget!G2` formulas hold their positions
+    // while the values move underneath them, so labels duplicate and other lines
+    // lose their forecast. The amounts are still summed - reporting must not cost
+    // you data - but the duplication is named.
+    var seenKey = section + '||' + normaliseLabel_(cellA);
+    if (seenLabels[seenKey]) {
+      issues.push({ check: 'A10', row: i + 1, detail: 'Forecast row "' + cellA +
+        '" repeats the label on row ' + seenLabels[seenKey] + ' of the same ' +
+        'section. If the Budget tab was sorted, the label formulas now point at ' +
+        'the wrong lines' });
+    } else {
+      seenLabels[seenKey] = i + 1;
     }
 
     var bucket = (section === 'revenue') ? result.income : result.cost;

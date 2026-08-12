@@ -145,17 +145,51 @@ budget does not: a delayed hire, a grant ending early, a re-profiled milestone.
 Layout, as parsed by `BudgetReader.parseForecastTab_`:
 
 ```
-A                              | B                     | C                     | D
--------------------------------|-----------------------|-----------------------|----------
-Revenue                        | Jul-Sep 26 Forecast   | Oct-Dec 26 Forecast   | Comments
-WW_25_TOI_006 - Grant income   | 35000                 | 35000                 |
-                               |                       |                       |
-Expenses                       | Jul-Sep 26 Forecast   | Oct-Dec 26 Forecast   | Comments
-WW_25_TOI_002 - General mgmt   | 7108                  | 0                     | GM role vacant from Oct
-WW_25_TOI_003 - Admin & Comms  | 2390                  | 0                     | comms advisor departed
-                               |                       |                       |
-Funding Source Details         |                       |                       |
+A                                     | B                   | C                   | D
+--------------------------------------|---------------------|---------------------|----------
+Revenue                               | Jul-Sep 26 Forecast | Oct-Dec 26 Forecast | Comments
+Baseline model assessment             | 7933.50             |                     | on signing
+Final validation and manuscript       |                     | 7933.50             | on completion
+                                      |                     |                     |
+Expenses                              | Jul-Sep 26 Forecast | Oct-Dec 26 Forecast | Comments
+Data Scientist - Baseline model asse.. | 3904                |                     | Nature Venture
+Data Scientist - Final validation ..   |                     | 3744                |
+                                      |                     |                     |
+Funding Source Details                |                     |                     |
 ```
+
+### Naming rows in column A
+
+You do not have to type item codes. Column A is resolved against the `Budget` tab at read time
+(`buildForecastLabelMap_`), and any of these forms works:
+
+| Form | Example | When to use it |
+|---|---|---|
+| the milestone | `Baseline model assessment and data ingestion` | **Revenue.** Income sits at milestone grain, and these are the same words as `Submitted_budget` |
+| `Description - Milestone` | `Data Scientist - Baseline model assessment and data ingestion` | **Expenses.** The only form that survives a description appearing under two milestones |
+| the bare item code | `SPY_26_UOA_001` | existing sheets, still supported |
+| the whole `Xero Inventory Item` cell | `SPY_26_UOA_001 - Baseline model assessment` | existing sheets, still supported |
+| a description unique in the file | `Coworking desks` | only when nothing else shares that description |
+
+Generate the composite form rather than typing it, so it cannot drift from the `Budget` tab:
+
+```
+=Budget!A2 & " - " & Budget!G2
+```
+
+(`A` is `Description`, `G` is `Milestone` in the standard column order. Both letters shift on a
+sheet carrying an `*Account` column or a metadata block above the header row.)
+
+**Do not sort the `Budget` tab.** Inserting and deleting rows is safe, because Sheets re-points
+cross-sheet references on insert and a delete gives you a loud `#REF!`. Sorting does neither: it
+moves values while the formulas hold their positions, so every label silently re-points to a
+different budget line while the figures beside it stay put. Health check **A10** catches the
+duplicate labels this produces.
+
+Matching ignores case and collapses repeated spaces. A label is matched **whole**, never split, so
+a description containing ` - ` is safe. A label pointing at more than one item code is refused
+rather than guessed at, and reported as **A8**. One milestone spanning several accounts is not
+ambiguous: those lines share one code, so the candidates collapse to one.
 
 Rules that are easy to get wrong:
 
@@ -168,8 +202,9 @@ Rules that are easy to get wrong:
   types a year. Do **not** re-anchor that formula on `TODAY()`: the header would then relabel itself
   each quarter while the figure beneath it stayed put, applying every forecast to the wrong quarter.
   The parser reads the computed value, so a formula header is fine.
-- Column A rows under a section must be `CODE - Name`, where `CODE` is the `Xero Inventory Item`
-  from the `Budget` tab. A row whose code cannot be parsed is skipped.
+- Column A rows under a section must resolve to exactly one `Budget` tab line. See *Naming rows in
+  column A* above for the forms accepted. A row that resolves to nothing, or to more than one, is
+  skipped and reported as **A8**.
 - Blank rows and rows whose column A starts with `Total` are skipped.
 - Parsing **stops entirely** at a column-A value of `Funding Source Details`. Anything below that
   line is invisible, which makes it a useful place for working notes.

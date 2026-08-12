@@ -118,6 +118,57 @@ function runTests() {
     healthToFlags(health).length === health.filter(function (f) {
       return f.severity !== 'info'; }).length);
 
+  // Forecast row labels. The Forecast tab may name a budget line by item code,
+  // by milestone, by "Description - Milestone", or by a description unique in the
+  // file. Mirrors SPY_26_UOA: two milestones, one item code each, with the same
+  // two descriptions appearing under both.
+  var uoaLines = [
+    { description: 'Data Scientist', milestone: 'Baseline model assessment and data ingestion',
+      item: 'SPY_26_UOA_001 - Baseline model assessment' },
+    { description: 'Project Manager', milestone: 'Baseline model assessment and data ingestion',
+      item: 'SPY_26_UOA_001 - Baseline model assessment' },
+    { description: 'Data Scientist', milestone: 'Final validation and co-authored manuscript',
+      item: 'SPY_26_UOA_002 - Final validation and manuscript' },
+    { description: 'Project Manager', milestone: 'Final validation and co-authored manuscript',
+      item: 'SPY_26_UOA_002 - Final validation and manuscript' }
+  ];
+  var uoaMap = buildForecastLabelMap_(uoaLines);
+  function resolves(label) { return resolveForecastLabel_(label, uoaMap).code; }
+
+  check('milestone name resolves', resolves('Baseline model assessment and data ingestion')
+    === 'SPY_26_UOA_001');
+  check('"Description - Milestone" resolves',
+    resolves('Data Scientist - Final validation and co-authored manuscript') === 'SPY_26_UOA_002');
+  check('bare item code still resolves', resolves('SPY_26_UOA_001') === 'SPY_26_UOA_001');
+  check('full "CODE - Name" still resolves',
+    resolves('SPY_26_UOA_001 - Baseline model assessment') === 'SPY_26_UOA_001');
+  check('label matching ignores case and extra spaces',
+    resolves('data scientist  -  final validation and co-authored manuscript')
+    === 'SPY_26_UOA_002');
+  // A description under two milestones must be refused, not guessed at. These two
+  // cost $936 in both milestones, so no amount of cleverness could pick one.
+  check('a description spanning two milestones is refused', !resolves('Project Manager'));
+  check('and the refusal names both candidates', (function () {
+    var e = resolveForecastLabel_('Project Manager', uoaMap).error || '';
+    return e.indexOf('SPY_26_UOA_001') !== -1 && e.indexOf('SPY_26_UOA_002') !== -1;
+  })());
+  check('an unknown label is refused', !resolves('Data Engineer'));
+  // One milestone spanning several accounts is not ambiguous: those lines share a
+  // code, so the candidate set collapses to one. This is the normal shape.
+  check('one milestone over three accounts resolves', resolveForecastLabel_('Data science',
+    buildForecastLabelMap_([
+      { description: 'Recruitment fees', milestone: 'Data science', item: 'X_001 - Data science' },
+      { description: 'Contractor', milestone: 'Data science', item: 'X_001 - Data science' },
+      { description: 'Software', milestone: 'Data science', item: 'X_001 - Data science' }
+    ])).code === 'X_001');
+  // Labels are matched whole, never split, so " - " inside a description is safe.
+  check('a description containing " - " is not mis-split', resolveForecastLabel_(
+    'Travel - domestic', buildForecastLabelMap_([{ description: 'Travel - domestic',
+      milestone: 'Fieldwork', item: 'Y_001 - Fieldwork' }])).code === 'Y_001');
+  check('a line with no item code offers no label',
+    Object.keys(buildForecastLabelMap_([{ description: 'Thing', milestone: 'M', item: '' }]))
+      .length === 0);
+
   // Forecast merge with FY columns: aggregate 'Up to last FY' + this FY quarters.
   // Forecast overrides live on the milestone itself, read from each funding
   // source's own Forecast tab by BudgetReader.parseForecastTab_.
