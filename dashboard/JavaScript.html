@@ -622,7 +622,10 @@
         return '<th class="' + cls.trim() + '">' + esc(col.label) + '</th>';
       }).join('') +
       '<th class="tot">' + lab.base + '</th><th class="tot">' + lab.actual + '</th>' +
-      '<th class="tot">Forecast</th><th class="tot">Variance</th>' +
+      '<th class="tot" title="Only quarters with an entry on the Forecast tab. ' +
+      'Quarters with no entry fall back to the budget baseline for Expected and ' +
+      'Variance, but are not counted here.">Forecast entered</th>' +
+      '<th class="tot">Variance</th>' +
       '<th class="cmt-h">Comment</th></tr></thead>';
 
     var body = '<tbody>' + t.milestones.map(function (m) {
@@ -661,11 +664,16 @@
           '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
       }).join('');
 
-      // Compute forecast total (sum of forecast for future quarters only)
+      // Forecast means what has actually been forecast: only cells with an override.
+      // It used to add the budget baseline for quarters with no override, so a milestone
+      // forecast to Q2 reported a Forecast total spanning Q3 and Q4 as well, and there was
+      // no way to tell the entered figures from the inferred ones. The baseline still
+      // drives Expected and Variance, which is a different question: what we expect to
+      // spend, rather than what we have said we will.
       var forecastTotal = 0;
       m.cells.forEach(function (c, i) {
         var col = t.columns[i];
-        if (!col.past && col.type === 'quarter') forecastTotal += c.forecast;
+        if (!col.past && col.type === 'quarter' && c.hasForecast) forecastTotal += c.forecast;
       });
 
       return '<tr><td class="mile">' + esc(m.milestone) + '</td>' + cells +
@@ -681,7 +689,7 @@
     t.milestones.forEach(function (m) {
       m.cells.forEach(function (c, i) {
         var col = t.columns[i];
-        if (!col.past && col.type === 'quarter') totForecast += c.forecast;
+        if (!col.past && col.type === 'quarter' && c.hasForecast) totForecast += c.forecast;
       });
     });
 
