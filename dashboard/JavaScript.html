@@ -35,12 +35,13 @@
       }).apiXeroStatus();
     }
 
-    var isFy = document.getElementById('bd-restrict-fy') ? document.getElementById('bd-restrict-fy').checked : false;
-    
-    // #totals are now updated inside renderBreakdown() so they match the filtered selection
+    // Today sits in the header so every tab shows it, not only the Overview.
+    var todayEl = document.getElementById('today-label');
+    if (todayEl && s.coverage) todayEl.textContent = dayMonthYear(s.coverage.today);
 
-
-    renderCoverage(s.coverage);
+    // #totals and the coverage line are both written inside renderBreakdown(), so they
+    // always describe the same filtered, FY-scoped selection.
+    buildFySelector(s);
     buildFilters();
     renderBreakdown();
 
@@ -52,10 +53,26 @@
   // description. See dashboard/HEALTH_CHECKS.md.
   function renderHealth(health) {
     var el = document.getElementById('flags');
-    if (!health.length) { el.innerHTML = ''; return; }
+    var badge = document.getElementById('health-badge');
 
     var counts = { error: 0, warning: 0, info: 0 };
     health.forEach(function (f) { counts[f.severity] = (counts[f.severity] || 0) + 1; });
+
+    // Health lives behind a tab now, so the badge is what tells you to look. Errors
+    // outrank warnings; info is never badged because nothing is wrong yet.
+    if (badge) {
+      var n = counts.error || counts.warning;
+      badge.textContent = n ? String(n) : '';
+      badge.className = 'badge' + (n ? (counts.error ? ' badge-error' : ' badge-warning')
+                                     : ' hidden');
+    }
+
+    if (!health.length) {
+      el.innerHTML = '<div class="health-sum">Nothing to report. Every sheet parsed and ' +
+        'every actual line is tagged.</div>';
+      return;
+    }
+
     var parts = [];
     if (counts.error) parts.push('<b>' + counts.error + (counts.error === 1 ? ' error' : ' errors') + '</b>');
     if (counts.warning) parts.push(counts.warning + (counts.warning === 1 ? ' warning' : ' warnings'));
@@ -143,9 +160,73 @@
       .map(function (c) { return c.value; });
   }
 
+  // ---- Financial-year scope -----------------------------------------------
+  // Quarter labels are "26/27 Q2", so the FY is everything before the space. The client
+  // totals whichever quarters belong to the selected year, which is why the snapshot
+  // carries per-quarter buckets rather than a single pre-computed "current FY" figure.
+
+  function fyOf(quarterLabel) { return String(quarterLabel).split(' ')[0]; }
+
+  // The selector lives in the Organisation overview subtitle, which renderCoverage
+  // rewrites on every render. So it is a persistent element created once and re-appended,
+  // rather than markup: rebuilding it each time would drop the user's choice and its
+  // change listener.
+  var fySelect = null;
+
+  function fySelectEl() {
+    if (!fySelect) {
+      fySelect = document.createElement('select');
+      fySelect.id = 'bd-fy';
+      fySelect.className = 'fy-select';
+      fySelect.innerHTML = '<option value="all">All time</option>';
+      // Changing the year only re-totals per-quarter buckets already in the snapshot,
+      // so no server round trip is needed.
+      fySelect.addEventListener('change', renderBreakdown);
+    }
+    return fySelect;
+  }
+
+  function selectedFy() {
+    return fySelect ? fySelect.value : 'all';
+  }
+
+  function sumAllQ(byQuarter) {
+    var total = 0;
+    Object.keys(byQuarter || {}).forEach(function (q) { total += byQuarter[q]; });
+    return total;
+  }
+
+  function sumFy(byQuarter, fyLabel) {
+    var total = 0;
+    Object.keys(byQuarter || {}).forEach(function (q) {
+      if (fyOf(q) === fyLabel) total += byQuarter[q];
+    });
+    return total;
+  }
+
+  /** Populate the selector from the quarters the snapshot actually covers. */
+  function buildFySelector(snap) {
+    var sel = fySelectEl();
+    var years = [];
+    (snap.quarters || []).forEach(function (q) {
+      var fy = fyOf(q);
+      if (years.indexOf(fy) === -1) years.push(fy);
+    });
+    var keep = sel.value;
+    sel.innerHTML = '<option value="all">All time</option>' +
+      years.map(function (y) { return '<option value="' + esc(y) + '">' + esc(y) + '</option>'; }).join('');
+    // Preserve the user's choice across refreshes; otherwise default to the current FY,
+    // falling back to the newest year present if the current one has nothing in it.
+    var current = fyOf(snap.currentQuarter || '');
+    if (keep && (keep === 'all' || years.indexOf(keep) !== -1)) sel.value = keep;
+    else if (years.indexOf(current) !== -1) sel.value = current;
+    else if (years.length) sel.value = years[years.length - 1];
+  }
+
   function renderBreakdown() {
     if (!snapshot) return;
-    var isFy = document.getElementById('bd-restrict-fy') ? document.getElementById('bd-restrict-fy').checked : false;
+    var fy = selectedFy();
+    var isFy = (fy !== 'all');
     var dims = selectedDims();
     var statuses = selectedStatuses();
     var projects = selectedValues('filter-projects');
@@ -168,14 +249,17 @@
       var key = dims.length ? dims.map(function (d) { return r[d]; }).join(' › ') : 'All';
       if (!groups[key]) {
         groups[key] = { label: key, dimVals: dims.map(function (d) { return r[d]; }),
-          budget: 0, secured: 0, actual: 0 };
+          budget: 0, secured: 0, actual: 0, weighted: 0 };
       }
-      groups[key].budget += isFy ? (r.budgetFY || 0) : r.budget;
-      groups[key].secured += isFy ? (r.securedFY || 0) : r.secured;
-      groups[key].actual += isFy ? (r.actualFY || 0) : r.actual;
+      groups[key].budget += isFy ? sumFy(r.budgetByQ, fy) : r.budget;
+      groups[key].secured += isFy ? sumFy(r.securedByQ, fy) : r.secured;
+      groups[key].actual += isFy ? sumFy(r.actualByQ, fy) : r.actual;
+      // Expected income has no all-time scalar on the row, so sum every quarter for the
+      // all-time view rather than passing a null year into sumFy, which matches nothing.
+      groups[key].weighted += isFy ? sumFy(r.weightedByQ, fy) : sumAllQ(r.weightedByQ);
     });
 
-    renderCoverage(snapshot.coverage, minStart, maxEnd);
+    renderCoverage(snapshot.coverage, minStart, maxEnd, isFy ? fy : null);
 
     var list = Object.keys(groups).map(function (k) { return groups[k]; })
       .sort(function (a, b) { return b.budget - a.budget; });
@@ -203,11 +287,12 @@
           '<span class="pct">' + pct + '%</span></div></td></tr>';
     }).join('');
 
-    var totBudget = 0, totSecured = 0, totActual = 0;
+    var totBudget = 0, totSecured = 0, totActual = 0, totWeighted = 0;
     list.forEach(function (g) {
       totBudget += g.budget;
       totSecured += g.secured;
       totActual += g.actual;
+      totWeighted += g.weighted;
     });
     var totPct = totBudget > 0 ? Math.round((totActual / totBudget) * 100) : 0;
     var totColor = totPct > 100 ? COLOR.danger : COLOR.ok;
@@ -215,10 +300,14 @@
     
     // Update the TOP Organisation Overview cards so they exactly match the filtered Breakdown
     document.getElementById('totals').innerHTML =
-      card((isFy ? 'FY forecast budget' : 'Total forecast budget'), fmtMoney(totBudget)) +
-      card((isFy ? 'FY secured funding' : 'Secured funding'), fmtMoney(totSecured)) +
-      card((isFy ? 'FY actual to date' : 'Actual to date'), fmtMoney(totActual)) +
-      card((isFy ? 'FY unsecured gap' : 'Unsecured gap'), fmtMoney(Math.max(0, totBudget - totSecured)), 'danger');
+      card((isFy ? fy + ' forecast budget' : 'Total forecast budget'), fmtMoney(totBudget)) +
+      card((isFy ? fy + ' secured funding' : 'Secured funding'), fmtMoney(totSecured)) +
+      card((isFy ? fy + ' actual' : 'Actual to date'), fmtMoney(totActual)) +
+      card((isFy ? fy + ' unsecured gap' : 'Unsecured gap'),
+           fmtMoney(Math.max(0, totBudget - totSecured)), 'danger') +
+      card((isFy ? fy + ' gap after pipeline' : 'Gap after pipeline'),
+           fmtMoney(Math.max(0, totBudget - totWeighted)),
+           (totBudget - totWeighted) > 0 ? 'amber' : '');
 
     var foot = '<tr><td colspan="' + footCols + '">Total</td>' +
       '<td class="num">' + fmtMoney(totBudget) + '</td>' +
@@ -236,13 +325,10 @@
     return v;
   }
 
-  Array.prototype.slice.call(document.querySelectorAll('.bd-dim, .bd-status, #bd-restrict-fy')).forEach(function (c) {
-    if (c.id === 'bd-restrict-fy') {
-      c.addEventListener('change', function() { render(snapshot); });
-    } else {
-      c.addEventListener('change', renderBreakdown);
-    }
-  });
+  // Changing the FY only re-totals per-quarter buckets already in the snapshot, so it
+  // needs no server round trip and no full re-render.
+  Array.prototype.slice.call(document.querySelectorAll('.bd-dim, .bd-status, #bd-fy'))
+    .forEach(function (c) { c.addEventListener('change', renderBreakdown); });
 
   Array.prototype.slice.call(document.querySelectorAll('.bd-dd-actions a')).forEach(function (a) {
     a.addEventListener('click', function (e) {
@@ -289,19 +375,30 @@
     var d = new Date(iso);
     return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
   }
-  function renderCoverage(c, overrideStart, overrideEnd) {
+  function renderCoverage(c, overrideStart, overrideEnd, fyLabel) {
     var el = document.getElementById('coverage');
     if (!c) { el.innerHTML = ''; return; }
     var start = overrideStart || c.forecastStart;
     var end = overrideEnd || c.forecastEnd;
+
+    // The scope text says what is actually on screen. It used to report the all-time
+    // budget span regardless of scope, so it contradicted the FY-scoped cards sitting
+    // directly beneath it, which was a large part of why the Overview read as confusing.
+    var scope = fyLabel
+      ? 'Showing <b>' + esc(fyLabel) + '</b>'
+      : 'Showing <b>all time</b> · budgeted &amp; forecast ' + monthYear(start) +
+        ' – ' + monthYear(end);
+
+    // The selector is rebuilt into this line every render, so its options are preserved
+    // and reattached rather than recreated from scratch. See keepFySelector.
     el.innerHTML =
-      '<span>Financial year <b>' + c.fyLabel + '</b> (' + monthYear(c.fyStart) +
-        ' – ' + monthYear(c.fyEnd) + ')</span>' +
+      '<span id="fy-slot"></span>' +
+      '<span>' + scope + '</span>' +
       '<span class="sep">·</span>' +
-      '<span>Today <b>' + dayMonthYear(c.today) + '</b></span>' +
-      '<span class="sep">·</span>' +
-      '<span>Budgeted &amp; forecast <b>' + monthYear(start) +
-        ' – ' + monthYear(end) + '</b></span>';
+      '<span>Current financial year <b>' + c.fyLabel + '</b> (' + monthYear(c.fyStart) +
+        ' – ' + monthYear(c.fyEnd) + ')</span>';
+    var slot = document.getElementById('fy-slot');
+    if (slot && fySelect) slot.appendChild(fySelect);
   }
 
   // ---- Refresh progress ---------------------------------------------------
@@ -393,6 +490,9 @@
     document.getElementById('view-overview').classList.toggle('hidden', view !== 'overview');
     document.getElementById('view-tracking').classList.toggle('hidden', view !== 'tracking');
     document.getElementById('view-planner').classList.toggle('hidden', view !== 'planner');
+    // Health needs no lazy load: the findings arrive with the snapshot and renderHealth
+    // has already written them.
+    document.getElementById('view-health').classList.toggle('hidden', view !== 'health');
     if (view === 'tracking' && !tracksLoaded) { tracksLoaded = true; loadSources(); }
     if (view === 'planner' && !plannerLoaded) { plannerLoaded = true; loadPlannerProjects(); }
   }
