@@ -238,6 +238,7 @@ function buildSnapshot() {
   const xeroOk = isXeroConnected();
   const secretsMissing = ['XERO_CLIENT_ID', 'XERO_CLIENT_SECRET'].filter(k => !getSecret(k));
   const health = buildHealth(budgets, actualLines, {
+    now: now,
     xeroConnected: xeroOk,
     exclusion: lastExclusionSummary(),
     secretsMissing: secretsMissing,
@@ -352,8 +353,8 @@ function sourceProbability_(status, metadata) {
  * Decide which source carries the cost in each exclusivity group.
  *
  * A group is one piece of work that several applications are chasing. Counting every
- * member's cost would multiply the work: two parallel asks for one $66,710 role would put
- * $133,420 of budget on the organisation. So exactly one member carries it.
+ * member's cost would multiply the work: two parallel asks for one $48,000 role would put
+ * $96,000 of budget on the organisation. So exactly one member carries it.
  *
  * Secured wins, because once an application lands that is the money being spent. Otherwise
  * the largest cost wins, since a budget should not understate the work. Name breaks ties so

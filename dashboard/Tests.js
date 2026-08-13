@@ -80,7 +80,7 @@ function runTests() {
   // cannot make for itself. See dashboard/HEALTH_CHECKS.md.
   var hBudgets = [{
     name: 'WW_25_TOI', status: 'secured', projectFolder: 'Wildlife Watcher', sheetUrl: '',
-    metadata: { owner: 'victor@wildlife.ai' },
+    metadata: { owner: 'someone@wildlife.ai' },
     tabs: ['Budget', 'Forecast', 'Xero export'],
     lines: [{ item: 'WW_25_TOI_002', cost: 100, income: 0, contribution: 0 },
             { item: '', cost: 5000, income: 0, contribution: 0 }],
@@ -113,7 +113,7 @@ function runTests() {
     return true;
   })());
   check('owner carried through from sheet metadata',
-    health.some(function (f) { return f.owner === 'victor@wildlife.ai'; }));
+    health.some(function (f) { return f.owner === 'someone@wildlife.ai'; }));
   check('legacy dataFlags strings exclude info findings',
     healthToFlags(health).length === health.filter(function (f) {
       return f.severity !== 'info'; }).length);
@@ -203,6 +203,25 @@ function runTests() {
     cellFor('26/27 Q3').effective === 1000 && cellFor('26/27 Q3').hasForecast === false);
   check('current quarter uses actual, not baseline', cellFor('26/27 Q1').effective === 0);
   check('expected = 4500 + 0 + 5000 + 1000 + 0', m.expectedTotal === 10500);
+
+  // "Forecast entered" counts only quarters with an override; Expected still falls back to
+  // the baseline. Two different questions: what we have said we will spend, and what we
+  // expect to spend. The client sums the first, so this mirrors its rule to guard it.
+  var entered = 0, withBaseline = 0;
+  m.cells.forEach(function (c, i) {
+    var col = grid.columns[i];
+    if (col.past || col.type !== 'quarter') return;
+    withBaseline += c.forecast;
+    if (c.hasForecast) entered += c.forecast;
+  });
+  check('forecast entered counts only the override', entered === 5000, String(entered));
+  // Current + future, baseline where there is no override: 7703 + 5000 + 1000 + 0. Note the
+  // current quarter is in here, which is why this column and Expected never agree: Expected
+  // uses the current quarter's actual instead.
+  check('the old baseline-inclusive figure was nearly 3x larger',
+    withBaseline === 13703, String(withBaseline));
+  check('expected still carries the baseline for un-forecast quarters',
+    m.expectedTotal === 10500);
   check('baseline total = 24102', m.baselineTotal === 24102);
   check('comment carried through', m.comment === 'staffing ramp');
 
@@ -235,6 +254,107 @@ function runTests() {
   check('addInto_ accumulates rather than overwrites',
     accQ['26/27 Q1'] === 17 && accQ['26/27 Q2'] === 5);
 
+  // The C, D and E checks. All were unimplementable until sheets carried Owner, Status,
+  // Funding end and Contribution policy. `now` is injected so they stay reproducible.
+  var NOW = d(2026, 8, 14);
+  function sheet_(over) {
+    var b = { name: 'XXX_27_GOOD', status: 'secured', projectFolder: 'General',
+      sheetUrl: '', tabs: ['Funding_info', 'Budget', 'Forecast', 'Submitted_budget'],
+      metadata: { 'funding source': 'XXX_27_GOOD', 'project': 'General',
+        'funder': 'Example Funder Trust', 'status': 'secured',
+        'funding start': '01/Apr/26', 'funding end': '31/Mar/27',
+        'owner': 'someone@wildlife.ai', 'contribution policy': 'none',
+        'last reviewed': '01/Aug/26' },
+      lines: [{ description: 'Delivery lead', milestone: 'Delivery',
+        item: 'XXX_27_GOOD_001 - Delivery', project: 'General',
+        start: d(2026, 4, 1), end: d(2027, 3, 31),
+        cost: 10000, income: 10000, contribution: 0 }],
+      hasProjectColumn: true, forecast: { cost: {}, income: {}, comments: {} }, issues: [] };
+    Object.keys(over || {}).forEach(function (k) {
+      if (k === 'metadata') Object.keys(over[k]).forEach(function (mk) {
+        if (over[k][mk] === null) delete b.metadata[mk]; else b.metadata[mk] = over[k][mk];
+      });
+      else b[k] = over[k];
+    });
+    return b;
+  }
+  function idsFor(budgets, actuals) {
+    return buildHealth(budgets, actuals || [],
+      { now: NOW, xeroConnected: true }).map(function (f) { return f.id; });
+  }
+  var spend_ = function (amount, date, over) {
+    var l = { kind: 'expense', project: 'General', fundingSource: 'XXX_27_GOOD',
+      item: 'XXX_27_GOOD_001 - Delivery', amount: amount, date: date };
+    Object.keys(over || {}).forEach(function (k) { l[k] = over[k]; });
+    return l;
+  };
+
+  check('a well-formed sheet raises nothing',
+    idsFor([sheet_()], [spend_(5000, '2026-07-01')])
+      .filter(function (i) { return i !== 'F5'; }).length === 0);
+
+  check('C1 names the missing metadata key',
+    idsFor([sheet_({ metadata: { owner: null } })]).indexOf('C1') !== -1);
+  check('C2 catches Status disagreeing with the folder',
+    idsFor([sheet_({ metadata: { status: 'proposed' } })]).indexOf('C2') !== -1);
+  check('C3 catches Funding source not matching the file name',
+    idsFor([sheet_({ metadata: { 'funding source': 'TYPO' } })]).indexOf('C3') !== -1);
+  check('C4 catches a stale review date',
+    idsFor([sheet_({ metadata: { 'last reviewed': '01/Jan/26' } })]).indexOf('C4') !== -1);
+  check('C5 catches a secured grant past its end date',
+    idsFor([sheet_({ metadata: { 'funding end': '31/Mar/26' } })]).indexOf('C5') !== -1);
+  check('C6 rejects an invented contribution policy',
+    idsFor([sheet_({ metadata: { 'contribution policy': 'all_income_contributes' } })])
+      .indexOf('C6') !== -1);
+  check('C6 accepts percent_of_income:40',
+    idsFor([sheet_({ metadata: { 'contribution policy': 'percent_of_income:40' } })])
+      .indexOf('C6') === -1);
+  check('C7 asks only proposed sheets for a decision date',
+    idsFor([sheet_({ status: 'proposed', metadata: { status: 'proposed' } })])
+      .indexOf('C7') !== -1 && idsFor([sheet_()]).indexOf('C7') === -1);
+
+  check('D3 counts spend with no item code',
+    idsFor([sheet_()], [spend_(900, '2026-07-01', { item: '' })]).indexOf('D3') !== -1);
+  check('D4 catches actuals tagged to a source with no sheet',
+    idsFor([sheet_()], [spend_(900, '2026-07-01', { fundingSource: 'XXX_27_TYPO' })])
+      .indexOf('D4') !== -1);
+  check('D5 catches a started grant with nothing coded to it',
+    idsFor([sheet_()], []).indexOf('D5') !== -1);
+  // The stale repeating-journal detector: nothing in Xero reports one.
+  check('D6 catches spend dated after the grant ended',
+    idsFor([sheet_()], [spend_(500, '2027-06-01')]).indexOf('D6') !== -1);
+
+  check('E1 catches overspend',
+    idsFor([sheet_()], [spend_(12000, '2026-07-01')]).indexOf('E1') !== -1);
+  // Under half the period elapsed, so it stays quiet even though almost nothing is spent.
+  check('E2 stays quiet before the halfway point',
+    idsFor([sheet_()], [spend_(100, '2026-07-01')]).indexOf('E2') === -1);
+  check('E2 fires once a grant is over half elapsed and well underspent',
+    idsFor([sheet_({ metadata: { 'funding end': '30/Sep/26' } })],
+           [spend_(100, '2026-05-01')]).indexOf('E2') !== -1);
+
+  check('E3 catches one item code in two sources',
+    idsFor([sheet_(), sheet_({ name: 'XXX_27_OTHER',
+      metadata: { 'funding source': 'XXX_27_OTHER' } })]).indexOf('E3') !== -1);
+  check('E4 catches the same description in two sources over overlapping dates', (function () {
+    var other = sheet_({ name: 'XXX_27_OTHER', metadata: { 'funding source': 'XXX_27_OTHER' } });
+    other.lines = [{ description: 'Delivery lead', milestone: 'Delivery',
+      item: 'XXX_27_OTHER_001 - Delivery', project: 'General',
+      start: d(2026, 6, 1), end: d(2026, 12, 31), cost: 8000, income: 8000, contribution: 0 }];
+    return idsFor([sheet_(), other]).indexOf('E4') !== -1;
+  })());
+  // Declared alternatives are G3's business, not E4's. Reporting both would double-charge
+  // the reader for one decision they already made.
+  check('E4 stays quiet when the two are declared alternatives', (function () {
+    var a = sheet_({ metadata: { 'exclusivity group': 'Delivery 26/27' } });
+    var other = sheet_({ name: 'XXX_27_OTHER', metadata: {
+      'funding source': 'XXX_27_OTHER', 'exclusivity group': 'Delivery 26/27' } });
+    other.lines = [{ description: 'Delivery lead', milestone: 'Delivery',
+      item: 'XXX_27_OTHER_001 - Delivery', project: 'General',
+      start: d(2026, 6, 1), end: d(2026, 12, 31), cost: 8000, income: 8000, contribution: 0 }];
+    return idsFor([a, other]).indexOf('E4') === -1;
+  })());
+
   // Probability parsing. "Unknown" must stay distinguishable from zero, or an ask with no
   // stated probability would silently count as hopeless.
   check('secured is always certain', sourceProbability_('secured', {}) === 1);
@@ -262,17 +382,17 @@ function runTests() {
                 project: 'General' }] };
   }
   var reps = chooseExclusivityReps_([
-    src_('GEN_27_TOI', 'proposed', 46710, 'FTE ramp 26/27'),
-    src_('GEN_27_OTHER', 'proposed', 30000, 'FTE ramp 26/27')
+    src_('XXX_27_ALPHA', 'proposed', 40000, 'Advisory role 26/27'),
+    src_('XXX_27_BETA', 'proposed', 30000, 'Advisory role 26/27')
   ]);
-  check('largest cost carries the work', reps['FTE ramp 26/27'] === 'GEN_27_TOI');
+  check('largest cost carries the work', reps['Advisory role 26/27'] === 'XXX_27_ALPHA');
 
   var reps2 = chooseExclusivityReps_([
-    src_('GEN_27_TOI', 'proposed', 46710, 'FTE ramp 26/27'),
-    src_('GEN_27_OTHER', 'secured', 30000, 'FTE ramp 26/27')
+    src_('XXX_27_ALPHA', 'proposed', 40000, 'Advisory role 26/27'),
+    src_('XXX_27_BETA', 'secured', 30000, 'Advisory role 26/27')
   ]);
   check('a secured source wins even when smaller, it is the money being spent',
-    reps2['FTE ramp 26/27'] === 'GEN_27_OTHER');
+    reps2['Advisory role 26/27'] === 'XXX_27_BETA');
 
   var reps3 = chooseExclusivityReps_([
     src_('B_SOURCE', 'proposed', 1000, 'tie'),

@@ -60,6 +60,19 @@ const CONFIG = {
   },
   BUDGET_REQUIRED_COLUMNS: ['start', 'end', 'cost'],
 
+  // ---- Health-check tuning ------------------------------------------------
+  // Keys a sheet must carry. C1 names any that are missing.
+  REQUIRED_META: ['funding source', 'project', 'funder', 'status',
+                  'funding start', 'funding end', 'owner'],
+  // C4: a sheet nobody has looked at in this long is probably no longer true.
+  STALE_REVIEW_DAYS: 90,
+  // E2: only worth asking about underspend once a grant is meaningfully under way, and
+  // only when the gap between time elapsed and money spent is wide enough to act on.
+  UNDERSPEND_MIN_ELAPSED: 0.5,
+  UNDERSPEND_GAP: 0.25,
+  // Contribution policy values the code understands. Anything else is C6.
+  CONTRIBUTION_POLICIES: [/^none$/, /^per_line$/, /^percent_of_income:\d+(\.\d+)?$/],
+
   // ---- Funding_info keys read by code -------------------------------------
   // Metadata keys are lower-cased by parseFundingInfoTab_, so these are the lower-case
   // forms. Everything else in Funding_info is documentation for humans.
