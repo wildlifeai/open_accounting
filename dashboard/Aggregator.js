@@ -33,6 +33,8 @@ function buildSnapshot() {
   const budgetByKey = {}; // 'project||source||milestone' -> { budget, income, status }
   const actualByKey = {}; // 'project||source||milestone' -> actual expense
   const actualByKeyFY = {}; // 'project||source||milestone' -> FY actual expense
+  const actualByKeyQ = {}; // 'project||source||milestone' -> { quarter label -> actual }
+  const quartersSeen = {};    // quarter label -> true, for the Overview's FY selector
   const sourceStatus = {};    // source name -> 'secured' | 'proposed'
   const itemToMilestone = {}; // 'source||itemCode' -> milestone name
 
@@ -92,13 +94,19 @@ function buildSnapshot() {
 
       if (!budgetByKey[bkey]) {
         budgetByKey[bkey] = { budget: 0, income: 0, status: src.status,
-          budgetFY: 0, incomeFY: 0, start: null, end: null };
+          budgetFY: 0, incomeFY: 0, budgetByQ: {}, incomeByQ: {},
+          start: null, end: null };
       }
       const entry = budgetByKey[bkey];
       entry.budget += l.cost;
       entry.income += l.income;
       entry.budgetFY += lineCostFY;
       entry.incomeFY += lineIncFY;
+      // Per-quarter as well as per-FY, so the Overview can be shown for any financial
+      // year rather than only the current one. The day-weighted month buckets already
+      // exist; bucketToQuarters just folds them into FY quarters.
+      addInto_(entry.budgetByQ, bucketToQuarters(lineCostByMonth));
+      addInto_(entry.incomeByQ, bucketToQuarters(lineIncByMonth));
       if (l.start && (!entry.start || l.start < new Date(entry.start)))
         entry.start = isoOrNull_(l.start);
       if (l.end && (!entry.end || l.end > new Date(entry.end)))
@@ -133,9 +141,30 @@ function buildSnapshot() {
     const akey = l.project + '||' + fs + '||' + mile;
     actualByKey[akey] = (actualByKey[akey] || 0) + l.amount;
     if (isFY) actualByKeyFY[akey] = (actualByKeyFY[akey] || 0) + l.amount;
+
+    // Actuals bucketed by the FY quarter the transaction falls in, so any financial
+    // year can be shown, not only the current one.
+    const q = quarterOfMonthKey_(DateMath.monthKey(new Date(l.date)));
+    if (q) {
+      if (!actualByKeyQ[akey]) actualByKeyQ[akey] = {};
+      actualByKeyQ[akey][q] = (actualByKeyQ[akey][q] || 0) + l.amount;
+    }
   });
 
-  const breakdownRows = buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStatus);
+  // Every quarter any budget or actual touches. Drives the Overview's FY selector, so
+  // it offers only years there is something to show.
+  Object.keys(budgetByKey).forEach(k => {
+    Object.keys(budgetByKey[k].budgetByQ).forEach(q => (quartersSeen[q] = true));
+    Object.keys(budgetByKey[k].incomeByQ).forEach(q => (quartersSeen[q] = true));
+  });
+  Object.keys(actualByKeyQ).forEach(k => {
+    Object.keys(actualByKeyQ[k]).forEach(q => (quartersSeen[q] = true));
+  });
+  const quarters = Object.keys(quartersSeen)
+    .sort((a, b) => quarterSortNum(a) - quarterSortNum(b));
+
+  const breakdownRows = buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY,
+                                            actualByKeyQ, sourceStatus);
 
   // Quarterly tracking grid (baseline + actual per funding source / milestone /
   // quarter). Forecast is layered on at view time from the live Forecast sheet,
@@ -186,6 +215,9 @@ function buildSnapshot() {
     generatedAt: now.toISOString(),
     xeroConnected: xeroOk,
     currentQuarter: currentQuarterLabel(),
+    // Every FY quarter any budget or actual touches, oldest first. The Overview's FY
+    // selector is built from these, so it only offers years with something in them.
+    quarters: quarters,
     coverage: coverage,
     totals: orgTotals_(rows),
     projects: rows,
@@ -205,7 +237,8 @@ function buildSnapshot() {
  * project / funding source / status / milestone. Built from the union of budget
  * and actual keys so spend that has no matching budget line still shows up.
  */
-function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStatus) {
+function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, actualByKeyQ,
+                             sourceStatus) {
   const keys = {};
   Object.keys(budgetByKey).forEach(k => (keys[k] = true));
   Object.keys(actualByKey).forEach(k => (keys[k] = true));
@@ -215,7 +248,8 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStat
     const project = parts[0];
     const source = parts[1];
     const milestone = parts[2] || '(unassigned)';
-    const b = budgetByKey[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0, start: null, end: null };
+    const b = budgetByKey[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0,
+      budgetByQ: {}, incomeByQ: {}, start: null, end: null };
     const status = (b.status || sourceStatus[source] || 'unknown');
     return {
       project: project,
@@ -228,10 +262,21 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStat
       budgetFY: round_(b.budgetFY || 0),
       securedFY: round_(status === 'secured' ? (b.incomeFY || 0) : 0),
       actualFY: round_(actualByKeyFY[key] || 0),
+      // Per-quarter, so the client can total any financial year. Secured mirrors income
+      // for secured sources and is empty otherwise, matching the scalar above.
+      budgetByQ: roundMapValues_(b.budgetByQ || {}),
+      securedByQ: status === 'secured' ? roundMapValues_(b.incomeByQ || {}) : {},
+      actualByQ: roundMapValues_(actualByKeyQ[key] || {}),
       start: b.start || null,
       end: b.end || null
     };
   });
+}
+
+/** Add every value of `src` into `dst`, in place. */
+function addInto_(dst, src) {
+  Object.keys(src || {}).forEach(k => { dst[k] = (dst[k] || 0) + src[k]; });
+  return dst;
 }
 
 /**

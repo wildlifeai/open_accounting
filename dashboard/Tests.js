@@ -206,6 +206,35 @@ function runTests() {
   check('baseline total = 24102', m.baselineTotal === 24102);
   check('comment carried through', m.comment === 'staffing ramp');
 
+  // Per-quarter buckets, which let the Overview total any financial year rather than
+  // only the current one. A line spanning Jan to Dec 2026 crosses FY25/26 Q4 into
+  // FY26/27 Q1-Q3, so the split must be day-weighted and the partition exhaustive.
+  var straddler = { milestone: 'M', item: 'X_001 - M', project: 'General',
+    start: d(2026, 1, 1), end: d(2026, 12, 31), cost: 12000, income: 12000, contribution: 0 };
+  var strMonths = distributeByMonth_([straddler], 'cost');
+  var strQ = bucketToQuarters(strMonths);
+  function sumMap(m) {
+    return Object.keys(m).reduce(function (a, k) { return a + m[k]; }, 0);
+  }
+  function sumFyQ(m, fy) {
+    return Object.keys(m).filter(function (q) { return q.split(' ')[0] === fy; })
+      .reduce(function (a, q) { return a + m[q]; }, 0);
+  }
+  check('quarter buckets sum to the line cost', Math.abs(sumMap(strQ) - 12000) < 0.01);
+  check('a straddling line lands in two financial years',
+    sumFyQ(strQ, '25/26') > 0 && sumFyQ(strQ, '26/27') > 0);
+  check('summing both years reproduces the whole line',
+    Math.abs(sumFyQ(strQ, '25/26') + sumFyQ(strQ, '26/27') - 12000) < 0.01);
+  // The per-quarter total must agree with the scalar the old FY-only view used, or the
+  // FY selector would quietly disagree with every previously reported figure.
+  check('per-quarter FY total equals sumMonthsInFY_',
+    Math.abs(sumMonthsInFY_(strMonths, fyBounds_(d(2026, 8, 13))) - sumFyQ(strQ, '26/27')) < 0.01);
+  var accQ = {};
+  addInto_(accQ, { '26/27 Q1': 10, '26/27 Q2': 5 });
+  addInto_(accQ, { '26/27 Q1': 7 });
+  check('addInto_ accumulates rather than overwrites',
+    accQ['26/27 Q1'] === 17 && accQ['26/27 Q2'] === 5);
+
   // Project-lead scoped access. filterSnapshotForProjects_ is pure precisely so this can
   // run without a second Google account signed in.
   var snap = {
