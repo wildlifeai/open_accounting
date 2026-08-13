@@ -59,6 +59,21 @@ const CONFIG = {
     project: 'Project'           // optional
   },
   BUDGET_REQUIRED_COLUMNS: ['start', 'end', 'cost'],
+
+  // ---- Funding_info keys read by code -------------------------------------
+  // Metadata keys are lower-cased by parseFundingInfoTab_, so these are the lower-case
+  // forms. Everything else in Funding_info is documentation for humans.
+  META: {
+    owner: 'owner',
+    link: 'link',                          // grant folder, contract, or a reference code
+    // 0-100. Chance this proposed application is won, used for the weighted pipeline.
+    // Accepts "40", "40%" or "0.4". Secured sources are always treated as 100.
+    probability: 'probability',
+    // Competing applications for the same work share a label here. Exactly one member of
+    // a group carries the cost; the rest are asks against it. Without this, two parallel
+    // applications for one role would double that role in the organisation budget.
+    exclusivityGroup: 'exclusivity group'
+  },
   DEFAULT_PROJECT: 'Unallocated',
   GENERAL_PROJECT: 'General',
 

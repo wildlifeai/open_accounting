@@ -120,6 +120,17 @@ the budget baseline, so an absent tab legitimately means "the budget is still ou
 | E5 | warning | Salary actuals attributed differently from budgeted salary lines | **The payroll-template drift detector.** Nothing in Xero reports a stale repeating journal; this is the only way it surfaces. |
 | E6 | info | Residual hand-entered overhead lines alongside a derived `Contribution policy` | Delete the manual duplicate. |
 
+### G. Funding pipeline — implemented 2026-08-13
+
+Complements the planned **E4**: that one detects duplication nobody declared, these handle
+duplication you *did* declare, via `Exclusivity group`.
+
+| id | Sev | Check | Action shown |
+|---|---|---|---|
+| G1 | warning | A `secured` source's income exceeds its budgeted cost | Two applications for the same work both landed, so reallocate the surplus, or income is filed against the wrong milestone. Also catches projected revenue misfiled as secured, which is the live `WW_26_SALES` case. |
+| G2 | info | A `proposed` source with no `Probability` in `Funding_info` | That ask is left out of expected income entirely rather than guessed at. "Unknown" is deliberately not "zero". |
+| G3 | info | Cost suppressed because a competing application in the same `Exclusivity group` carries it | Expected, and reported so the suppression is never invisible arithmetic. Remove the group value if these are genuinely separate work. |
+
 ### F. System health — aimed at the GM and maintainer
 
 | id | Sev | Check | Action shown |

@@ -65,6 +65,18 @@ const HEALTH_CATALOGUE = {
   B5: { severity: 'warning', category: 'Data quality',
     title: 'Contribution does not equal Income minus Cost',
     action: 'Recompute the Contribution column, or explain it in Comments.' },
+  G1: { severity: 'warning', category: 'Funding',
+    title: 'Secured funding exceeds the budgeted cost',
+    action: 'Either two applications for the same work both landed, in which case ' +
+      'reallocate the surplus, or income is filed against the wrong milestone.' },
+  G2: { severity: 'info', category: 'Funding',
+    title: 'Proposed source with no Probability',
+    action: 'Add Probability to Funding_info (0-100). Without it this ask is left out ' +
+      'of expected income entirely, rather than guessed at.' },
+  G3: { severity: 'info', category: 'Funding',
+    title: 'Cost not counted, a competing application carries it',
+    action: 'Expected: one exclusivity group is one piece of work. Remove the ' +
+      'Exclusivity group value if these are genuinely separate work.' },
   D1: { severity: 'error', category: 'Xero coding',
     title: 'Actual spend with no Projects tag',
     action: 'Tag these in Xero. Untagged lines are dropped from every total.' },
@@ -173,6 +185,36 @@ function buildHealth(budgets, actualLines, ctx) {
     if (b5) {
       add('B5', withBase_(base, { detail: b5 +
         ' line(s) where Contribution does not equal Income minus Cost' }));
+    }
+
+    // --- E1: secured income beyond the work it pays for ---
+    // Two applications for the same thing both landing is a good problem, but it has to
+    // surface or the surplus is never reallocated. The same check catches income filed
+    // against the wrong milestone, and projected revenue misfiled as secured.
+    if (b.status === 'secured') {
+      var cost = 0, income = 0;
+      (b.lines || []).forEach(l => { cost += l.cost || 0; income += l.income || 0; });
+      if (income - cost > 1) {
+        add('G1', withBase_(base, { amount: Math.round(income - cost),
+          detail: 'secured income ' + Math.round(income) + ' exceeds budgeted cost ' +
+            Math.round(cost) + ' by ' + Math.round(income - cost) }));
+      }
+    }
+
+    // --- E2: a proposed ask with no stated probability ---
+    if (b.status === 'proposed' &&
+        sourceProbability_(b.status, meta) === null &&
+        (b.lines || []).length) {
+      add('G2', withBase_(base, { detail: 'no "' + CONFIG.META.probability +
+        '" in Funding_info, so this ask is absent from expected income' }));
+    }
+
+    // --- E3: cost suppressed because a competing application carries it ---
+    var supp = ((ctx || {}).exclusivity || {}).suppressed || {};
+    if (supp[b.name]) {
+      add('G3', withBase_(base, { detail: 'exclusivity group "' + supp[b.name].group +
+        '": the cost is counted on ' + supp[b.name].countedIn + ' instead, so this ' +
+        'sheet contributes its ask but not the work behind it' }));
     }
   });
 

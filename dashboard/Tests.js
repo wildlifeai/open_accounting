@@ -235,6 +235,67 @@ function runTests() {
   check('addInto_ accumulates rather than overwrites',
     accQ['26/27 Q1'] === 17 && accQ['26/27 Q2'] === 5);
 
+  // Probability parsing. "Unknown" must stay distinguishable from zero, or an ask with no
+  // stated probability would silently count as hopeless.
+  check('secured is always certain', sourceProbability_('secured', {}) === 1);
+  check('secured ignores a stated probability',
+    sourceProbability_('secured', { probability: '40' }) === 1);
+  check('proposed with no probability is null, not 0',
+    sourceProbability_('proposed', {}) === null);
+  check('blank probability is null', sourceProbability_('proposed', { probability: '  ' }) === null);
+  check('"40" reads as 40%', sourceProbability_('proposed', { probability: '40' }) === 0.4);
+  check('"40%" reads as 40%', sourceProbability_('proposed', { probability: '40%' }) === 0.4);
+  check('0.4 reads as 40%', sourceProbability_('proposed', { probability: 0.4 }) === 0.4);
+  check('1 is certainty, not one percent',
+    sourceProbability_('proposed', { probability: 1 }) === 1);
+  check('over 100 clamps to certainty',
+    sourceProbability_('proposed', { probability: '150' }) === 1);
+  check('nonsense is null, not 0',
+    sourceProbability_('proposed', { probability: 'maybe' }) === null);
+
+  // Exclusivity groups: one piece of work, several asks. Exactly one member carries the
+  // cost or the work is multiplied across the organisation budget.
+  function src_(name, status, cost, group) {
+    return { name: name, status: status,
+      metadata: group ? { 'exclusivity group': group } : {},
+      lines: [{ cost: cost, income: cost, milestone: 'M', item: name + '_001 - M',
+                project: 'General' }] };
+  }
+  var reps = chooseExclusivityReps_([
+    src_('GEN_27_TOI', 'proposed', 46710, 'FTE ramp 26/27'),
+    src_('GEN_27_OTHER', 'proposed', 30000, 'FTE ramp 26/27')
+  ]);
+  check('largest cost carries the work', reps['FTE ramp 26/27'] === 'GEN_27_TOI');
+
+  var reps2 = chooseExclusivityReps_([
+    src_('GEN_27_TOI', 'proposed', 46710, 'FTE ramp 26/27'),
+    src_('GEN_27_OTHER', 'secured', 30000, 'FTE ramp 26/27')
+  ]);
+  check('a secured source wins even when smaller, it is the money being spent',
+    reps2['FTE ramp 26/27'] === 'GEN_27_OTHER');
+
+  var reps3 = chooseExclusivityReps_([
+    src_('B_SOURCE', 'proposed', 1000, 'tie'),
+    src_('A_SOURCE', 'proposed', 1000, 'tie')
+  ]);
+  check('ties break by name, so the choice is stable across refreshes',
+    reps3['tie'] === 'A_SOURCE');
+
+  check('a source with no group is never suppressed',
+    Object.keys(chooseExclusivityReps_([src_('SOLO', 'proposed', 500, '')])).length === 0);
+  check('two groups are decided independently', (function () {
+    var r = chooseExclusivityReps_([
+      src_('X1', 'proposed', 10, 'g1'), src_('X2', 'proposed', 20, 'g1'),
+      src_('Y1', 'proposed', 40, 'g2'), src_('Y2', 'proposed', 30, 'g2')]);
+    return r['g1'] === 'X2' && r['g2'] === 'Y1';
+  })());
+
+  check('scaleMap_ zeroes a suppressed cost without mutating the source', (function () {
+    var m = { '26/27 Q1': 100 };
+    var z = scaleMap_(m, 0);
+    return z['26/27 Q1'] === 0 && m['26/27 Q1'] === 100;
+  })());
+
   // Project-lead scoped access. filterSnapshotForProjects_ is pure precisely so this can
   // run without a second Google account signed in.
   var snap = {
