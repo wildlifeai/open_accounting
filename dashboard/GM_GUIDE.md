@@ -9,15 +9,24 @@ to change a budget or a Xero transaction so the dashboard reflects it.
 
 Sign in with your `wildlife.ai` Google account and bookmark it. The link never changes.
 
-The figure top-right ("synced Nh ago") tells you how fresh the data is. It refreshes itself
-roughly every 6 hours; click **Refresh now** to pull the latest immediately.
+The figure top-right ("synced Nh ago") tells you how fresh the data is, next to today's date.
+It refreshes itself roughly every 6 hours; click **Refresh now** to pull the latest
+immediately.
 
-## Two tabs
+A refresh takes about a minute, and a progress bar shows which phase it is in
+(`Reading WW_25_TOI (6 of 9)`, `Fetching Xero Invoices, page 2`). Most of that minute is
+Drive and Xero, not the dashboard.
+
+## Four tabs
 
 - **Overview** - the org-wide picture with a flexible breakdown (below).
-- **Quarterly tracking** - where you track spend and update the forward forecast for one
-  funding source at a time. This replaces the old per-funding-source
-  "Budget, Actual, Forecast Tracking" tab - see ["Tracking and forecasting"](#tracking-and-forecasting-quarterly) below.
+- **Quarterly tracking** - where you track spend against one funding source at a time. This
+  replaces the old per-funding-source "Budget, Actual, Forecast Tracking" tab - see
+  ["Tracking and forecasting"](#tracking-and-forecasting-quarterly) below.
+- **Project planner** - milestone segments on a timeline, coloured by funding status.
+- **Health** - sheet, Xero-coding and system problems found on the last refresh. The tab
+  carries a count badge: red for errors, amber for warnings, nothing when clean. **If that
+  badge is showing, a number somewhere on the dashboard is wrong.**
 
 ## What you're looking at (Overview)
 

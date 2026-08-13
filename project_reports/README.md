@@ -1,3 +1,11 @@
+> **Status: superseded, pending a decision.** This aggregator predates the Funding Cockpit
+> and produces the same thing the cockpit's Overview does when grouped by project
+> (requirement 10 in the [root README](../README.md)). Two implementations of one
+> requirement is how the cockpit's three views came to disagree with each other. Nothing
+> here is deployed from this repo: there is no `.clasp.json`.
+>
+> Quarterly budget generation, which used to live here, was retired on 2026-08-11.
+
 # Project Reports
 
 Apps Script source for aggregating funding data into the `PROJECT_overview` spreadsheet.

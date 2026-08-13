@@ -80,7 +80,7 @@ amounts, rates, funder terms or invoice identifiers into it.**
 | `Decision date` | proposed only | When the funder decides. Blank for secured. Funders ask for this on application forms. |
 | `Owner` | yes | Email of whoever maintains this sheet. Health checks are addressed to this person. |
 | `Probability` | proposed only | 0-100: the chance this ask is won. Drives the "gap after pipeline" figure. Accepts `40`, `40%` or `0.4`; anything at or below 1 is read as a fraction, so `1` means certainty. A `secured` source is always 100 whatever this says. Absent means unknown, and the ask is left out of expected income rather than counted as zero (check **G2**). |
-| `Exclusivity group` | when competing | A label shared by applications chasing the **same work**, e.g. `Advisory role 26/27`. Exactly one member carries the cost, the rest are asks against it. Without this, two parallel applications for one $66,710 role would put $133,420 of budget on the organisation. Secured beats proposed; then largest cost; then name, so the choice is stable between refreshes. Reported as **G3** on the members whose cost is suppressed. |
+| `Exclusivity group` | when competing | A label shared by applications chasing the **same work**, e.g. `Advisory role 26/27`. Exactly one member carries the cost, the rest are asks against it. Without this, two parallel applications for one $48,000 role would put $96,000 of budget on the organisation. Secured beats proposed; then largest cost; then name, so the choice is stable between refreshes. Reported as **G3** on the members whose cost is suppressed. |
 | `Link` | recommended | Where the grant folder, contract or funding agreement lives. A Drive URL, or a reference code such as `27_TOI_GENERAL`. What the budget is accountable to, one click from the budget itself. Read into metadata but not yet surfaced anywhere in the cockpit. |
 | `Last reviewed` | yes | Date last checked against reality. Staleness is otherwise invisible. |
 | `Notes` | no | Free text. Not parsed — never put a number here that something else needs. |
@@ -152,12 +152,12 @@ Layout, as parsed by `BudgetReader.parseForecastTab_`:
 A                                     | B                   | C                   | D
 --------------------------------------|---------------------|---------------------|----------
 Revenue                               | Jul-Sep 26 Forecast | Oct-Dec 26 Forecast | Comments
-Baseline model assessment             | 7933.50             |                     | on signing
-Final validation and manuscript       |                     | 7933.50             | on completion
+Phase one                             | 20000               |                     | on signing
+Phase two                             |                     | 20000               | on completion
                                       |                     |                     |
 Expenses                              | Jul-Sep 26 Forecast | Oct-Dec 26 Forecast | Comments
-Data Scientist - Baseline model asse.. | 3904                |                     | Nature Venture
-Data Scientist - Final validation ..   |                     | 3744                |
+Delivery lead - Phase one             | 12000               |                     | invented figures
+Delivery lead - Phase two             |                     | 12000               | invented figures
                                       |                     |                     |
 Funding Source Details                |                     |                     |
 ```

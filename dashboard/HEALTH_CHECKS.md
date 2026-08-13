@@ -34,7 +34,7 @@ display. `snapshot.dataFlags` becomes the legacy alias for `health` filtered to 
   detail: 'WW_25_TOI line 24: End 30/Jun/01 precedes Start 01/Feb/26.',
   fundingSource: 'WW_25_TOI',
   project: 'Wildlife Watcher',
-  owner: 'victor@wildlife.ai',         // from the sheet's metadata block
+  owner: 'someone@wildlife.ai',         // from the sheet's metadata block
   amount: 2000,                        // value at risk, when quantifiable
   action: 'Fix the End date on that line. 30/Jun/01 parses as year 2001.',
   link: 'https://docs.google.com/spreadsheets/d/…'
@@ -83,12 +83,12 @@ the budget baseline, so an absent tab legitimately means "the budget is still ou
 | B3 | error | `End` before `Start` | Check the year — `30/Jun/01` parses as 2001. |
 | B4 | error | Blank `Xero Inventory Item` | Line falls out of the tracking grid. Report count **and share of budget value**. |
 | B5 | warning | `Contribution` ≠ `Income − Cost` | Recompute or explain. |
-| B6 | warning | `*Account` not in the Xero chart of accounts | Fix the label to `Name (code)` exactly. |
 
 ### C. Metadata
 
 | id | Sev | Check | Action shown |
 |---|---|---|---|
+| _(none implemented yet, see below)_ | | | |
 | C1 | error | Required metadata key missing | Name the key. |
 | C2 | error | `Status` disagrees with the folder | Move the file or fix the value — the cockpit trusts the folder for forecasts. |
 | C3 | error | `Funding source` ≠ file name | Budgets and actuals will not join. |
@@ -107,18 +107,16 @@ the budget baseline, so an absent tab legitimately means "the budget is still ou
 | D4 | error | Actuals coded to a `Funding source` with no budget sheet | Either the sheet is missing or the tag is a typo. |
 | D5 | warning | Budget sheet with zero actuals though its period has started | Nothing is being coded to it. |
 | D6 | error | Actuals against a funding source whose `Funding end` has passed, or whose sheet is archived | Almost always a stale recurring journal or template. |
-| D7 | error | Spend counted on an excluded balance-sheet account | Only reachable once `EXCLUDED_ACCOUNTS` is wired up. |
 
 ### E. Reconciliation
 
 | id | Sev | Check | Action shown |
 |---|---|---|---|
+| _(none implemented yet, see below)_ | | | |
 | E1 | warning | Actuals exceed budget for a funding source | Re-budget or explain to the funder. |
 | E2 | warning | Under-spend risk: proportion spent well below proportion of period elapsed | Funders care about underspend as much as overspend. |
 | E3 | error | Same item code in two funding sources | One cost billed twice. |
 | E4 | warning | Same `*Account` + `Description` in two sources with overlapping dates | Double-funding signal — e.g. the same FTE in two grants. |
-| E5 | warning | Salary actuals attributed differently from budgeted salary lines | **The payroll-template drift detector.** Nothing in Xero reports a stale repeating journal; this is the only way it surfaces. |
-| E6 | info | Residual hand-entered overhead lines alongside a derived `Contribution policy` | Delete the manual duplicate. |
 
 ### G. Funding pipeline — implemented 2026-08-13
 
@@ -136,9 +134,7 @@ duplication you *did* declare, via `Exclusivity group`.
 | id | Sev | Check | Action shown |
 |---|---|---|---|
 | F1 | error | Xero not connected or token invalid | Run the reconnect step; actuals are stale meanwhile. |
-| F2 | warning | Snapshot older than 2× the refresh interval | The refresh trigger may be broken. |
 | F3 | error | Required Script Properties missing | Name which. |
-| F4 | warning | A Xero scope needed by a feature in use is absent | Re-consent required. |
 | F5 | info | Last refresh time, duration, sheets read, lines parsed | Trend tells you when the 6-minute limit is approaching. |
 
 ## UI
@@ -175,8 +171,33 @@ Two things gate this work:
    `WebApp.js` and `JavaScript.html` changes. Building the health panel on a third branch before it
    lands guarantees conflicts in exactly those files.
 2. **The metadata template drives categories C and much of D and E.** Those checks are
-   unimplementable until sheets carry `Owner`, `Status`, `Funding end` and `Contribution policy`.
+   were unimplementable until sheets carried `Owner`, `Status`, `Funding end` and
+   `Contribution policy`. They now do, and C1 to C7 were built on 2026-08-14 as a result.
 
 So: merge the sync branch, then implement the `BudgetReader` reporting change plus categories A, B
 and F — which need no new sheet data and would surface real problems today. Categories C, D6, E4 and
 E5 follow as the metadata block rolls out.
+
+---
+
+## Not yet implemented
+
+Designed, not built. Nothing below appears in the Health tab, and nothing below is
+enforced. Kept because the design work is worth keeping, separated because a backlog
+that reads like behaviour is worse than no documentation: it tells the GM the cockpit is
+watching something it is not.
+
+Ids are reserved, so implementing one means moving its row up rather than renumbering.
+
+| id | Sev | Check | Action shown |
+|---|---|---|---|
+| ~~B6~~ | — | ~~`*Account` not in the Xero chart of accounts~~ | **Moot.** The `*Account` column was retired with A5 on 2026-08-11: budgets are set at milestone level, so there is no account label to validate. |
+| ~~D7~~ | — | ~~Spend counted on an excluded balance-sheet account~~ | **Superseded.** `EXCLUDED_ACCOUNTS` was wired up on 2026-08-11, so this can no longer happen. The exclusion count and total are reported by **F5**. |
+| E5 | warning | Salary actuals attributed differently from budgeted salary lines | **Blocked, and worth unblocking.** The payroll-template drift detector. It needs budgets at account level to compare against, and budgets are now at milestone level by design, so there is nothing to compare. **D6** catches part of the same failure by a different route: spend still arriving after a grant has ended is usually a stale repeating journal. |
+| E6 | info | Residual hand-entered overhead lines alongside a derived `Contribution policy` | **Blocked.** Identifying an overhead line reliably needs the `*Account` column, which is retired. Matching on description text would be guesswork. |
+| F2 | warning | Snapshot older than 2× the refresh interval | **Wrong layer, not blocked.** Health is computed *during* a refresh, so the snapshot is always fresh at the moment this would run. It has to be evaluated when the page renders a cached snapshot, in `renderHealth`, not in `buildHealth`. |
+| F4 | warning | A Xero scope needed by a feature in use is absent | Not built. `accounting.transactions.read` covers everything currently fetched, so there is nothing to detect yet. Worth adding when a feature needs a scope beyond it. |
+
+`dashboard/check_docs.js` fails if any id above appears in `HEALTH_CATALOGUE`, or if any
+id in the catalogue is missing from the tables above it. That is what keeps this split
+honest rather than aspirational.

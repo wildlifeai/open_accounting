@@ -60,19 +60,19 @@ because nothing told them when a tag was missing.
 
 ## The eleven requirements
 
-Status as at 12 August 2026. This table is the test specification: "does the cockpit work" means
+Status as at 14 August 2026. This table is the test specification: "does the cockpit work" means
 "does it answer these".
 
 | # | What | Freq | Persona | Source of truth | Today |
 |---|---|---|---|---|---|
-| 1 | Forecast reported to Board | Q | Board | Cockpit: secured + weighted pipeline, frozen | Forecast exists. **No pipeline weighting and no freezing at all**: `storeSnapshot_` overwrites one Drive file, and the trigger runs every 6 hours, so August's number is gone by November |
-| 2 | Annual organisation budget | A | Board, GM | Cockpit: all funding sources + General | **`General` cannot be read** (pre-migration schema, superseded by `General 26-29`). Separately, the contribution rollup that feeds General its overhead from other projects exists **only in the Project planner**, not in the Overview or quarterly tracking |
+| 1 | Forecast reported to Board | Q | Board | Cockpit: secured + weighted pipeline, frozen | Weighting now exists: `Probability` per proposed source drives a "gap after pipeline" figure. **Freezing still does not**: `storeSnapshot_` overwrites one Drive file and the trigger runs every 6 hours, so August's number is gone by November |
+| 2 | Annual organisation budget | A | Board, GM | Cockpit: all funding sources + General | The unreadable pre-migration sheets were archived on 13 August. **The contribution rollup that feeds General its overhead from other projects still exists only in the Project planner**, not in the Overview or quarterly tracking, so those two views disagree about General |
 | 3 | P&L (income and expenses) | Q | Board | Xero | Derived from bank and invoices only. Payroll posts as manual journals, which **are** reachable (`GET /ManualJournals?page=1`, `LineAmount` signed) and carry Tracking, but have **no `ItemCode`**, so payroll cannot reach milestone grain |
 | 4 | Working capital balance and forecast | Q | Board, Treasurer | Xero balance sheet + deferred grants | Absent. No scope, no endpoint called |
 | 5 | Bill payments | M | Bookkeeper | Xero | Native Xero. Deliberately out of scope for the cockpit |
-| 6 | Payroll | F | Bookkeeper | Xero Payroll | Native, but must carry all four tags and a manual journal can carry only two. The health panel now flags untagged spend (D1, D2), which is the feedback loop that was missing, but **it is not routed to the bookkeeper** |
+| 6 | Payroll | F | Bookkeeper | Xero Payroll | Native, but must carry all four tags and a manual journal can carry only two. The health panel now flags untagged spend (D1, D2), spend with no item code (D3), spend tagged to a source with no sheet (D4), and **spend still arriving after a grant ended (D6), which is how a stale repeating journal surfaces**. The feedback loop exists; **it is still not routed to the bookkeeper** |
 | 7 | Funding source income and expense variance | M | Project lead | Cockpit | Exists. Monthly cadence not enforced |
-| 8 | Funding source budget | per funder | GM | Sheets template | Template and validation now exist (checks A1 to A10, B1 to B5). Three legacy-schema files remain, for archiving rather than conversion |
+| 8 | Funding source budget | per funder | GM | Sheets template | Template and validation both exist: **37 health checks** across sheet structure, data quality, metadata, Xero coding, reconciliation and the funding pipeline. Legacy-schema files archived 13 August |
 | 9 | Funding source summary | per funder | Funder | Cockpit export | Absent. **No funder-facing output of any kind**; every funder report is hand-built |
 | 10 | Project budget overview | per project | Project lead, GM | Cockpit rollup | Exists (group by project) |
 | 11 | YTD P&L | Q | Project lead → Board | Cockpit, per project YTD | Partial |
