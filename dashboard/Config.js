@@ -59,6 +59,34 @@ const CONFIG = {
     project: 'Project'           // optional
   },
   BUDGET_REQUIRED_COLUMNS: ['start', 'end', 'cost'],
+
+  // ---- Health-check tuning ------------------------------------------------
+  // Keys a sheet must carry. C1 names any that are missing.
+  REQUIRED_META: ['funding source', 'project', 'funder', 'status',
+                  'funding start', 'funding end', 'owner'],
+  // C4: a sheet nobody has looked at in this long is probably no longer true.
+  STALE_REVIEW_DAYS: 90,
+  // E2: only worth asking about underspend once a grant is meaningfully under way, and
+  // only when the gap between time elapsed and money spent is wide enough to act on.
+  UNDERSPEND_MIN_ELAPSED: 0.5,
+  UNDERSPEND_GAP: 0.25,
+  // Contribution policy values the code understands. Anything else is C6.
+  CONTRIBUTION_POLICIES: [/^none$/, /^per_line$/, /^percent_of_income:\d+(\.\d+)?$/],
+
+  // ---- Funding_info keys read by code -------------------------------------
+  // Metadata keys are lower-cased by parseFundingInfoTab_, so these are the lower-case
+  // forms. Everything else in Funding_info is documentation for humans.
+  META: {
+    owner: 'owner',
+    link: 'link',                          // grant folder, contract, or a reference code
+    // 0-100. Chance this proposed application is won, used for the weighted pipeline.
+    // Accepts "40", "40%" or "0.4". Secured sources are always treated as 100.
+    probability: 'probability',
+    // Competing applications for the same work share a label here. Exactly one member of
+    // a group carries the cost; the rest are asks against it. Without this, two parallel
+    // applications for one role would double that role in the organisation budget.
+    exclusivityGroup: 'exclusivity group'
+  },
   DEFAULT_PROJECT: 'Unallocated',
   GENERAL_PROJECT: 'General',
 
@@ -125,7 +153,15 @@ const CONFIG = {
   // Script Properties). The file id is kept in a Script Property.
   SNAPSHOT_FILE_NAME: 'cockpit_snapshot.json',
   SNAPSHOT_FILE_ID_PROPERTY: 'COCKPIT_SNAPSHOT_FILE_ID',
-  REFRESH_TRIGGER_HOURS: 6
+  REFRESH_TRIGGER_HOURS: 6,
+
+  // ---- Refresh progress ---------------------------------------------------
+  // Apps Script cannot stream to a client, so refreshSnapshot writes its current phase
+  // here and the browser polls apiRefreshProgress for it. CacheService rather than
+  // PropertiesService: transient, written many times per refresh, and it must not
+  // outlive a crashed run. The TTL is the backstop for a run that dies without clearing.
+  PROGRESS_CACHE_KEY: 'COCKPIT_REFRESH_PROGRESS',
+  PROGRESS_CACHE_TTL_SECONDS: 600
 };
 
 /** Settings spreadsheet id from Config or Script Property. */

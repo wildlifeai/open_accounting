@@ -211,6 +211,12 @@ function paginate_(path, collectionKey, mapper, modifiedAfter) {
   const out = [];
   let page = 1;
   while (true) {
+    // Page count is unknown until the last one comes back short, so there is no honest
+    // total. Creep through the 50-90% band instead, five points a page, capped. Xero is
+    // the largest phase by wall clock: ~30s of a ~60s refresh at 9 sources, and it grows
+    // with the history window that earliestBudgetStart_ derives from the oldest budget line.
+    setRefreshProgress_('Fetching Xero ' + collectionKey + ', page ' + page, 0, 0,
+                        Math.min(88, 50 + (page - 1) * 5));
     const params = { page: page };
     if (modifiedAfter) params['where'] = 'UpdatedDateUTC>=DateTime(' +
       modifiedAfter.substring(0, 10).split('-').join(',') + ')';

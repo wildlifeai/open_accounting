@@ -9,10 +9,23 @@
     <header>
       <div class="title"><span class="dot"></span> Funding cockpit</div>
       <div class="sync">
+        <!-- Today sits with the title so it is on every tab, not buried in the
+             Overview's subtitle where the other two tabs never saw it. -->
+        <span id="today-label" class="today"></span>
         <span id="sync-label">loading…</span>
         <button id="refresh">Refresh now</button>
       </div>
     </header>
+
+    <!-- Refresh progress. Shown only while a refresh runs, populated by polling
+         apiRefreshProgress. Height is reserved whether or not it is visible, so
+         appearing does not shove the whole page down. -->
+    <div class="refresh-progress-slot">
+      <div id="refresh-progress" class="refresh-progress hidden">
+        <div class="refresh-bar"><div id="refresh-bar-fill" class="refresh-bar-fill"></div></div>
+        <span id="refresh-bar-label" class="refresh-bar-label"></span>
+      </div>
+    </div>
 
     <div id="xero-warning" class="banner hidden">
       Xero is not connected — actuals are unavailable.
@@ -23,11 +36,17 @@
       <button class="tab active" data-view="overview">Overview</button>
       <button class="tab" data-view="tracking">Quarterly tracking</button>
       <button class="tab" data-view="planner">Project planner</button>
+      <!-- The count badge is not decoration. Health used to sit at the foot of the
+           Overview where it was unavoidable; behind a tab, nothing would tell you there
+           were fourteen errors unless the tab says so. -->
+      <button class="tab" data-view="health">Health <span id="health-badge" class="badge hidden"></span></button>
     </nav>
 
     <div id="view-overview">
       <div class="overview-section">
         <h2>Organisation overview</h2>
+        <!-- The timeframe selector lives in the subtitle, ahead of the scope text, so the
+             control and the description of what is on screen read as one line. -->
         <div id="coverage" class="coverage"></div>
         <section class="cards" id="totals"></section>
       </div>
@@ -48,10 +67,8 @@
               <label><input type="checkbox" class="bd-status" value="secured" checked> Secured (confirmed)</label>
               <label><input type="checkbox" class="bd-status" value="proposed" checked> Proposed</label>
             </div>
-            <div class="bd-controls">
-              <span class="bd-label">timeframe:</span>
-              <label><input type="checkbox" id="bd-restrict-fy"> Restrict to this financial year</label>
-            </div>
+            <!-- The timeframe selector used to sit here. It now lives in the
+                 Organisation overview subtitle, rendered by renderCoverage. -->
             <div class="bd-controls">
               <span class="bd-label">filter:</span>
               <details class="bd-dd">
@@ -87,8 +104,17 @@
           <span class="muted">Secured = confirmed funding · Status: secured (confirmed) vs proposed</span>
         </div>
       </div>
-      
-      <div id="flags" class="flags"></div>
+    </div>
+
+    <div id="view-health" class="hidden">
+      <div class="overview-section">
+        <h2>System health</h2>
+        <div class="coverage">
+          <span>Sheet, Xero coding and system problems found on the last refresh. Each
+            finding names what is wrong, where, who owns it and what to do.</span>
+        </div>
+        <div id="flags" class="flags"></div>
+      </div>
     </div>
 
     <div id="view-tracking" class="hidden">

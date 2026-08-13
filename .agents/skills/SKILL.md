@@ -446,8 +446,9 @@ Projects contribute a share of income to `General` — Spyfish 40% by default, `
 because they disallow overheads.
 
 **This rule exists nowhere as data.** In the General budget it appears as quarterly negative-cost
-lines (`Overheads from projects, −$32,046`) with the split written as prose in a Comments cell
-(`Spyfish Aotearoa: $12441.41 Wildlife Watcher: $19604.17`). Every quarter someone recomputes it;
+lines (`Overheads from projects, −$30,000`) with the split written as prose in a Comments cell
+(`Spyfish Aotearoa: $12,000 Wildlife Watcher: $18,000`, figures invented). Every quarter someone
+recomputes it;
 nothing can read it; project and General budgets drift apart.
 
 Target state: declare a contribution policy per funding source (`none`,
@@ -471,6 +472,19 @@ The same cost must not be charged to two funding sources for the same period. Si
 Rule: when preparing any funding application, check whether the cost is already funded elsewhere,
 and make handoffs explicit with dates rather than comments. When two applications go to the same
 funder, ensure neither budget charges management hours the other already covers.
+
+**Since 2026-08-13 this is enforced rather than remembered**, by three checks and one field:
+
+* **E3** — the same item code in two funding sources. Codes are `{SOURCE}_{NNN}` precisely so
+  this cannot happen accidentally.
+* **E4** — the same `Description` budgeted in two sources over overlapping dates. This is the
+  detector for the second and third bullets above.
+* **`Exclusivity group`** in `Funding_info` — for duplication that is *deliberate*, i.e. two
+  applications chasing the same work in the hope one lands. Members share a label, exactly one
+  carries the cost, and **G3** reports the ones whose cost was suppressed. Without it, two
+  parallel asks for one role put twice that role's cost on the organisation.
+* **E4 stays silent inside an exclusivity group.** E4 is for duplication nobody declared; G3 is
+  for duplication that was. Reporting both would charge the reader twice for one decision.
 
 ---
 

@@ -24,7 +24,31 @@
     padding: 10px 14px; margin-bottom: 16px; font-size: 13px; }
   .banner a { color: var(--danger-text); font-weight: 500; margin-left: 8px; }
   .hidden { display: none; }
-  
+
+  .today { font-weight: 500; color: var(--muted); }
+
+  /* Count badge on the Health tab. Health sits behind a tab, so this is the only thing
+     that says look. */
+  .badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 6px;
+    border-radius: 9px; font-size: 11px; font-weight: 600; line-height: 18px;
+    text-align: center; color: #fff; }
+  .badge-error { background: var(--red); }
+  .badge-warning { background: var(--amber); }
+
+  .fy-select { font: inherit; font-size: 12px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; margin-right: 4px; }
+
+  /* Refresh progress. A refresh is around a minute, almost all of it opening one
+     spreadsheet at a time, so the wait has to look bounded rather than broken.
+     The slot reserves the height so showing the bar does not shove the page down. */
+  .refresh-progress-slot { height: 22px; margin-bottom: 6px; }
+  .refresh-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .refresh-bar { flex: 1; height: 6px; background: var(--bg2); border: 1px solid var(--line);
+    border-radius: 3px; overflow: hidden; }
+  .refresh-bar-fill { height: 100%; width: 0; background: var(--green);
+    border-radius: 3px; transition: width .4s ease; }
+  .refresh-bar-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
   .overview-section { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
   .overview-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
   .overview-section > h2 { font-size: 16px; font-weight: 600; color: var(--text); margin: 0 0 16px 0; }

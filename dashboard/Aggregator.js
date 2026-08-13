@@ -19,9 +19,13 @@ function buildSnapshot() {
   const now = new Date();
   const fy = fyBounds_(now);
 
+  // The folder walk is not free: measured at ~13s of a ~60s refresh, because DriveApp
+  // folder and file iterators are slow even though nothing is opened yet.
+  setRefreshProgress_('Finding budget sheets', 0, 0, 2);
   const budgets = readAllBudgets();
   const actualSince = earliestBudgetStart_(budgets);
   const actualLines = isXeroConnected() ? fetchXeroActuals(actualSince) : [];
+  setRefreshProgress_('Aggregating ' + actualLines.length + ' actual line(s)', 0, 0, 90);
 
   const projects = {}; // name -> rollup accumulator
   const fundingSources = []; // per-source summary
@@ -29,19 +33,35 @@ function buildSnapshot() {
   const budgetByKey = {}; // 'project||source||milestone' -> { budget, income, status }
   const actualByKey = {}; // 'project||source||milestone' -> actual expense
   const actualByKeyFY = {}; // 'project||source||milestone' -> FY actual expense
+  const actualByKeyQ = {}; // 'project||source||milestone' -> { quarter label -> actual }
+  const quartersSeen = {};    // quarter label -> true, for the Overview's FY selector
   const sourceStatus = {};    // source name -> 'secured' | 'proposed'
   const itemToMilestone = {}; // 'source||itemCode' -> milestone name
 
   function project_(name) {
     if (!projects[name]) {
       projects[name] = { name: name, proposedBudget: 0, securedIncome: 0,
-        proposedIncome: 0, actualExpense: 0,
-        proposedBudgetFY: 0, securedIncomeFY: 0, proposedIncomeFY: 0, actualExpenseFY: 0 };
+        proposedIncome: 0, actualExpense: 0, weightedIncome: 0,
+        proposedBudgetFY: 0, securedIncomeFY: 0, proposedIncomeFY: 0, actualExpenseFY: 0,
+        weightedIncomeFY: 0 };
     }
     return projects[name];
   }
 
+  // Competing applications for the same work share an Exclusivity group, and only one
+  // member of each group carries the cost. See chooseExclusivityReps_.
+  const exclusivityReps = chooseExclusivityReps_(budgets);
+  const costSuppressed = {};  // source name -> the source that carries the cost instead
+
   budgets.forEach(src => {
+    const group = clean_((src.metadata || {})[CONFIG.META.exclusivityGroup] || '');
+    const rep = group ? exclusivityReps[group] : null;
+    // A non-representative still contributes its ask, just not the work behind it.
+    const carriesCost = !group || rep === src.name;
+    if (!carriesCost) costSuppressed[src.name] = { group: group, countedIn: rep };
+    const costFactor = carriesCost ? 1 : 0;
+    const probability = sourceProbability_(src.status, src.metadata);
+
     // Per-line project attribution is handled in BudgetReader: a line uses its
     // `Project` value when set, otherwise the parent project folder. Falling back
     // to the folder is expected, so it is not flagged here.
@@ -59,13 +79,20 @@ function buildSnapshot() {
       const incTotal = fc.totalBudgetIncome * share;
       const expFY = expenseFY * share;
       const incFY = incomeFY * share;
-      p.proposedBudget += expTotal;
+      p.proposedBudget += expTotal * costFactor;
       p.proposedIncome += incTotal;
-      p.proposedBudgetFY += expFY;
+      p.proposedBudgetFY += expFY * costFactor;
       p.proposedIncomeFY += incFY;
       if (src.status === 'secured') {
         p.securedIncome += incTotal;
         p.securedIncomeFY += incFY;
+      }
+      // Expected income: secured counts in full, proposed at its stated probability. A
+      // proposed source with no probability contributes nothing here rather than being
+      // guessed at, and check G2 asks for the number.
+      if (probability !== null) {
+        p.weightedIncome += incTotal * probability;
+        p.weightedIncomeFY += incFY * probability;
       }
     });
 
@@ -88,13 +115,25 @@ function buildSnapshot() {
 
       if (!budgetByKey[bkey]) {
         budgetByKey[bkey] = { budget: 0, income: 0, status: src.status,
-          budgetFY: 0, incomeFY: 0, start: null, end: null };
+          budgetFY: 0, incomeFY: 0, budgetByQ: {}, incomeByQ: {}, weightedByQ: {},
+          start: null, end: null };
       }
       const entry = budgetByKey[bkey];
-      entry.budget += l.cost;
+      // costFactor is 0 when a competing application in the same exclusivity group carries
+      // the work. The ask still shows; the work is counted once, on the representative.
+      entry.budget += l.cost * costFactor;
       entry.income += l.income;
-      entry.budgetFY += lineCostFY;
+      entry.budgetFY += lineCostFY * costFactor;
       entry.incomeFY += lineIncFY;
+      // Per-quarter as well as per-FY, so the Overview can be shown for any financial
+      // year rather than only the current one. The day-weighted month buckets already
+      // exist; bucketToQuarters just folds them into FY quarters.
+      addInto_(entry.budgetByQ, scaleMap_(bucketToQuarters(lineCostByMonth), costFactor));
+      addInto_(entry.incomeByQ, bucketToQuarters(lineIncByMonth));
+      if (probability !== null) {
+        addInto_(entry.weightedByQ,
+                 scaleMap_(bucketToQuarters(lineIncByMonth), probability));
+      }
       if (l.start && (!entry.start || l.start < new Date(entry.start)))
         entry.start = isoOrNull_(l.start);
       if (l.end && (!entry.end || l.end > new Date(entry.end)))
@@ -104,13 +143,21 @@ function buildSnapshot() {
     sourceStatus[src.name] = src.status;
     fundingSources.push({ name: src.name, status: src.status,
       project: src.projectFolder, budgetExpense: fc.totalBudgetExpense,
-      budgetIncome: fc.totalBudgetIncome });
+      budgetIncome: fc.totalBudgetIncome,
+      probability: probability, exclusivityGroup: group || '',
+      carriesCost: carriesCost,
+      link: clean_((src.metadata || {})[CONFIG.META.link] || '') });
   });
 
   // Actuals from Xero, split by project, funding-source, and milestone.
   actualLines.forEach(l => {
     if (l.kind !== 'expense') return;
     if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
+    // An archived source's budget file is skipped by the crawl (collectStatusFolder_),
+    // so keeping its actuals guaranteed a mismatch: spend with no budget beside it,
+    // inflating org actuals and making the whole organisation look overspent.
+    // buildTimeline_ already filtered both, so the two views disagreed.
+    if (startsWith_(l.fundingSource || '', CONFIG.ARCHIVE_PREFIX)) return;
     const p = project_(l.project);
     p.actualExpense += l.amount;
     
@@ -124,9 +171,30 @@ function buildSnapshot() {
     const akey = l.project + '||' + fs + '||' + mile;
     actualByKey[akey] = (actualByKey[akey] || 0) + l.amount;
     if (isFY) actualByKeyFY[akey] = (actualByKeyFY[akey] || 0) + l.amount;
+
+    // Actuals bucketed by the FY quarter the transaction falls in, so any financial
+    // year can be shown, not only the current one.
+    const q = quarterOfMonthKey_(DateMath.monthKey(new Date(l.date)));
+    if (q) {
+      if (!actualByKeyQ[akey]) actualByKeyQ[akey] = {};
+      actualByKeyQ[akey][q] = (actualByKeyQ[akey][q] || 0) + l.amount;
+    }
   });
 
-  const breakdownRows = buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStatus);
+  // Every quarter any budget or actual touches. Drives the Overview's FY selector, so
+  // it offers only years there is something to show.
+  Object.keys(budgetByKey).forEach(k => {
+    Object.keys(budgetByKey[k].budgetByQ).forEach(q => (quartersSeen[q] = true));
+    Object.keys(budgetByKey[k].incomeByQ).forEach(q => (quartersSeen[q] = true));
+  });
+  Object.keys(actualByKeyQ).forEach(k => {
+    Object.keys(actualByKeyQ[k]).forEach(q => (quartersSeen[q] = true));
+  });
+  const quarters = Object.keys(quartersSeen)
+    .sort((a, b) => quarterSortNum(a) - quarterSortNum(b));
+
+  const breakdownRows = buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY,
+                                            actualByKeyQ, sourceStatus);
 
   // Quarterly tracking grid (baseline + actual per funding source / milestone /
   // quarter). Forecast is layered on at view time from the live Forecast sheet,
@@ -145,10 +213,12 @@ function buildSnapshot() {
       securedIncome: round_(p.securedIncome),
       actualExpense: round_(p.actualExpense),
       unsecuredGap: round_(Math.max(0, p.proposedBudget - p.securedIncome)),
+      weightedIncome: round_(p.weightedIncome),
       proposedBudgetFY: round_(p.proposedBudgetFY),
       securedIncomeFY: round_(p.securedIncomeFY),
       actualExpenseFY: round_(p.actualExpenseFY),
-      unsecuredGapFY: round_(Math.max(0, p.proposedBudgetFY - p.securedIncomeFY))
+      unsecuredGapFY: round_(Math.max(0, p.proposedBudgetFY - p.securedIncomeFY)),
+      weightedIncomeFY: round_(p.weightedIncomeFY)
     };
   });
 
@@ -168,15 +238,26 @@ function buildSnapshot() {
   const xeroOk = isXeroConnected();
   const secretsMissing = ['XERO_CLIENT_ID', 'XERO_CLIENT_SECRET'].filter(k => !getSecret(k));
   const health = buildHealth(budgets, actualLines, {
+    now: now,
     xeroConnected: xeroOk,
     exclusion: lastExclusionSummary(),
-    secretsMissing: secretsMissing
+    secretsMissing: secretsMissing,
+    // So G3 can name which source had its cost suppressed and which carries it instead.
+    exclusivity: { reps: exclusivityReps, suppressed: costSuppressed }
   });
 
   return {
     generatedAt: now.toISOString(),
     xeroConnected: xeroOk,
     currentQuarter: currentQuarterLabel(),
+    // Every FY quarter any budget or actual touches, oldest first. The Overview's FY
+    // selector is built from these, so it only offers years with something in them.
+    quarters: quarters,
+    // Which source carries the cost in each exclusivity group, and which had theirs
+    // suppressed as a result. Health check G3 turns this into a visible finding, because
+    // a silently suppressed cost is exactly the kind of invisible arithmetic this
+    // dashboard exists to stop.
+    exclusivity: { reps: exclusivityReps, suppressed: costSuppressed },
     coverage: coverage,
     totals: orgTotals_(rows),
     projects: rows,
@@ -196,7 +277,8 @@ function buildSnapshot() {
  * project / funding source / status / milestone. Built from the union of budget
  * and actual keys so spend that has no matching budget line still shows up.
  */
-function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStatus) {
+function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, actualByKeyQ,
+                             sourceStatus) {
   const keys = {};
   Object.keys(budgetByKey).forEach(k => (keys[k] = true));
   Object.keys(actualByKey).forEach(k => (keys[k] = true));
@@ -206,7 +288,8 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStat
     const project = parts[0];
     const source = parts[1];
     const milestone = parts[2] || '(unassigned)';
-    const b = budgetByKey[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0, start: null, end: null };
+    const b = budgetByKey[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0,
+      budgetByQ: {}, incomeByQ: {}, weightedByQ: {}, start: null, end: null };
     const status = (b.status || sourceStatus[source] || 'unknown');
     return {
       project: project,
@@ -219,10 +302,84 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, sourceStat
       budgetFY: round_(b.budgetFY || 0),
       securedFY: round_(status === 'secured' ? (b.incomeFY || 0) : 0),
       actualFY: round_(actualByKeyFY[key] || 0),
+      // Per-quarter, so the client can total any financial year. Secured mirrors income
+      // for secured sources and is empty otherwise, matching the scalar above.
+      budgetByQ: roundMapValues_(b.budgetByQ || {}),
+      securedByQ: status === 'secured' ? roundMapValues_(b.incomeByQ || {}) : {},
+      actualByQ: roundMapValues_(actualByKeyQ[key] || {}),
+      // Secured in full plus proposed at its probability. What we expect to have, as
+      // opposed to what is committed.
+      weightedByQ: roundMapValues_(b.weightedByQ || {}),
       start: b.start || null,
       end: b.end || null
     };
   });
+}
+
+/** Add every value of `src` into `dst`, in place. */
+function addInto_(dst, src) {
+  Object.keys(src || {}).forEach(k => { dst[k] = (dst[k] || 0) + src[k]; });
+  return dst;
+}
+
+/** Scale every value of a map by `f`, returning a new map. */
+function scaleMap_(map, f) {
+  const out = {};
+  Object.keys(map || {}).forEach(k => { out[k] = map[k] * f; });
+  return out;
+}
+
+/**
+ * Chance a source's income actually arrives, as 0..1.
+ *
+ * Secured means the money is committed, so it is always 1 whatever the sheet says.
+ * A proposed source with no Probability returns null: that is "unknown", not "zero", and
+ * the caller must not silently treat it as either. Check G2 reports it.
+ *
+ * Accepts "40", "40%", 40 or 0.4. Anything at or below 1 is read as a fraction, so 0.4
+ * and 40% mean the same thing. 1 is therefore certainty, not one percent.
+ */
+function sourceProbability_(status, metadata) {
+  if (status === 'secured') return 1;
+  const raw = (metadata || {})[CONFIG.META.probability];
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const n = parseFloat(String(raw).replace('%', '').trim());
+  if (isNaN(n) || n < 0) return null;
+  const p = n > 1 ? n / 100 : n;
+  return Math.min(1, p);
+}
+
+/**
+ * Decide which source carries the cost in each exclusivity group.
+ *
+ * A group is one piece of work that several applications are chasing. Counting every
+ * member's cost would multiply the work: two parallel asks for one $48,000 role would put
+ * $96,000 of budget on the organisation. So exactly one member carries it.
+ *
+ * Secured wins, because once an application lands that is the money being spent. Otherwise
+ * the largest cost wins, since a budget should not understate the work. Name breaks ties so
+ * the choice is stable between refreshes rather than depending on Drive's ordering.
+ *
+ * @return {Object} group label -> source name that carries the cost
+ */
+function chooseExclusivityReps_(budgets) {
+  const groups = {};
+  (budgets || []).forEach(src => {
+    const label = clean_((src.metadata || {})[CONFIG.META.exclusivityGroup] || '');
+    if (!label) return;
+    const cost = (src.lines || []).reduce((a, l) => a + (l.cost || 0), 0);
+    const cand = { name: src.name, secured: src.status === 'secured', cost: cost };
+    const best = groups[label];
+    if (!best ||
+        (cand.secured && !best.secured) ||
+        (cand.secured === best.secured && cand.cost > best.cost) ||
+        (cand.secured === best.secured && cand.cost === best.cost && cand.name < best.name)) {
+      groups[label] = cand;
+    }
+  });
+  const reps = {};
+  Object.keys(groups).forEach(label => { reps[label] = groups[label].name; });
+  return reps;
 }
 
 /**
@@ -505,11 +662,12 @@ function latestBudgetEnd_(budgets) {
 function isoOrNull_(d) { return d ? d.toISOString() : null; }
 
 function orgTotals_(rows) {
-  const t = { budget: 0, secured: 0, actual: 0, unsecuredGap: 0,
-              budgetFY: 0, securedFY: 0, actualFY: 0, unsecuredGapFY: 0 };
+  const t = { budget: 0, secured: 0, actual: 0, unsecuredGap: 0, weighted: 0,
+              budgetFY: 0, securedFY: 0, actualFY: 0, unsecuredGapFY: 0, weightedFY: 0 };
   rows.forEach(r => {
     t.budget += r.proposedBudget; t.secured += r.securedIncome;
     t.actual += r.actualExpense; t.unsecuredGap += r.unsecuredGap;
+    t.weighted += r.weightedIncome || 0; t.weightedFY += r.weightedIncomeFY || 0;
     t.budgetFY += r.proposedBudgetFY; t.securedFY += r.securedIncomeFY;
     t.actualFY += r.actualExpenseFY; t.unsecuredGapFY += r.unsecuredGapFY;
   });

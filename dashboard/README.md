@@ -94,10 +94,13 @@ definitions are fixed in `Aggregator.js`: **secured = `secured/` only; proposed 
 | `Aggregator.js` | Join budgets + actuals → snapshot; forecast definitions; breakdown rows; quarterly baseline+actual |
 | `ForecastStore.js` | Read/write the central Forecast Sheet (GM's forward forecast) |
 | `TrackingBuilder.js` | Merge baseline + actual + forecast into the quarterly grid |
-| `Snapshot.js` | Cache (JSON file in Drive) + refresh trigger |
+| `HealthCheck.js` | Turns silent wrongness into named findings. Pure, so it runs offline |
+| `Snapshot.js` | Cache (JSON file in Drive), refresh trigger, and refresh-progress writes |
 | `WebApp.js` | `doGet`, client API (`google.script.run`), admin menu |
 | `Index/Stylesheet/JavaScript.html` | The dashboard UI |
 | `Tests.js` | `runTests()` — checks the math with no Drive/Xero |
+| `Probe.js` | Read-only Xero diagnostics, run by hand from the editor. Never on a trigger |
+| `check_docs.js` | Node, not Apps Script. Fails when these docs disagree with the code |
 
 ---
 

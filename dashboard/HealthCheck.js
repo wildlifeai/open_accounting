@@ -39,11 +39,16 @@ const HEALTH_CATALOGUE = {
     title: 'Forecast column header not recognised',
     action: 'Name it exactly "MMM-MMM YY Forecast", e.g. "Jul-Sep 26 Forecast".' },
   A8: { severity: 'warning', category: 'Sheet structure',
-    title: 'Forecast row is not a milestone',
-    action: 'Use "CODE - Name", matching the Xero Inventory Item on the Budget tab.' },
-  A9: { severity: 'info', category: 'Sheet structure',
+    title: 'Forecast row does not match a budget line',
+    action: 'Label it with the milestone, or "Description - Milestone" from the ' +
+      'Budget tab. The row\'s forecast is discarded until it resolves.' },
+  A9: { severity: 'warning', category: 'Sheet structure',
     title: 'Forecast for a milestone not in the budget',
     action: 'Either the budget line was removed, or the code is a typo.' },
+  A10: { severity: 'warning', category: 'Sheet structure',
+    title: 'Two forecast rows share one label',
+    action: 'Usually a sorted Budget tab: the label formulas now point at the ' +
+      'wrong lines. Re-point them and do not sort the Budget tab.' },
   B1: { severity: 'warning', category: 'Data quality',
     title: 'Lines skipped as empty',
     action: 'Set Cost/Income deliberately, or delete the row.' },
@@ -52,13 +57,73 @@ const HEALTH_CATALOGUE = {
     action: 'Use DD/MMM/YY. The line is ignored entirely.' },
   B3: { severity: 'error', category: 'Data quality',
     title: 'End date precedes Start date',
-    action: 'Check the year - "30/Jun/01" parses as 2001. The line is ignored.' },
+    action: 'Check the year: a two-digit year can land in the wrong century. ' +
+      'The line is ignored.' },
   B4: { severity: 'error', category: 'Data quality',
     title: 'Lines with no Xero Inventory Item',
     action: 'Add the milestone code, or these fall outside quarterly tracking.' },
   B5: { severity: 'warning', category: 'Data quality',
     title: 'Contribution does not equal Income minus Cost',
     action: 'Recompute the Contribution column, or explain it in Comments.' },
+  C1: { severity: 'error', category: 'Metadata',
+    title: 'Required metadata key missing',
+    action: 'Add it to Funding_info. See BUDGET_SHEET_TEMPLATE.md.' },
+  C2: { severity: 'error', category: 'Metadata',
+    title: 'Status disagrees with the folder',
+    action: 'The cockpit trusts the folder. Move the file, or fix the Status value.' },
+  C3: { severity: 'error', category: 'Metadata',
+    title: 'Funding source does not match the file name',
+    action: 'Budgets and actuals join on this string. Make the two identical.' },
+  C4: { severity: 'warning', category: 'Metadata',
+    title: 'Last reviewed is stale',
+    action: 'Check the sheet against reality, then update the date.' },
+  C5: { severity: 'warning', category: 'Metadata',
+    title: 'Funding end has passed but the sheet is still secured',
+    action: 'Archive it, or extend Funding end. Note that archiving removes its ' +
+      'actuals from organisation totals.' },
+  C6: { severity: 'error', category: 'Metadata',
+    title: 'Contribution policy missing or unparseable',
+    action: 'Use none, per_line, or percent_of_income:<n>.' },
+  C7: { severity: 'warning', category: 'Metadata',
+    title: 'Proposed source with no Decision date',
+    action: 'Funders ask for it, and the pipeline cannot be timed without it.' },
+  D3: { severity: 'warning', category: 'Xero coding',
+    title: 'Actual spend with no item code',
+    action: 'Falls outside the quarterly tracking grid. Set the Product/Service in Xero.' },
+  D4: { severity: 'error', category: 'Xero coding',
+    title: 'Actuals coded to a funding source with no budget sheet',
+    action: 'Either the sheet is missing, or the Xero tag is a typo.' },
+  D5: { severity: 'warning', category: 'Xero coding',
+    title: 'Secured grant under way with no actuals at all',
+    action: 'Nothing is being coded to it. Usually a missing or misspelt Xero tag.' },
+  D6: { severity: 'error', category: 'Xero coding',
+    title: 'Actuals dated after the grant ended',
+    action: 'Almost always a stale repeating journal or template still pointing here.' },
+  E1: { severity: 'warning', category: 'Reconciliation',
+    title: 'Actuals exceed the budget',
+    action: 'Re-budget, or explain the overspend to the funder.' },
+  E2: { severity: 'warning', category: 'Reconciliation',
+    title: 'Underspend risk',
+    action: 'Funders care about underspend as much as overspend. Re-profile or spend.' },
+  E3: { severity: 'error', category: 'Reconciliation',
+    title: 'Same item code in two funding sources',
+    action: 'One cost is billed to two funders. Item codes are {SOURCE}_{NNN} for a reason.' },
+  E4: { severity: 'warning', category: 'Reconciliation',
+    title: 'Same description budgeted in two sources over the same dates',
+    action: 'Double-funding signal, e.g. one FTE in two grants. If deliberate, put both ' +
+      'sheets in one Exclusivity group so the cost is counted once.' },
+  G1: { severity: 'warning', category: 'Funding',
+    title: 'Secured funding exceeds the budgeted cost',
+    action: 'Either two applications for the same work both landed, in which case ' +
+      'reallocate the surplus, or income is filed against the wrong milestone.' },
+  G2: { severity: 'info', category: 'Funding',
+    title: 'Proposed source with no Probability',
+    action: 'Add Probability to Funding_info (0-100). Without it this ask is left out ' +
+      'of expected income entirely, rather than guessed at.' },
+  G3: { severity: 'info', category: 'Funding',
+    title: 'Cost not counted, a competing application carries it',
+    action: 'Expected: one exclusivity group is one piece of work. Remove the ' +
+      'Exclusivity group value if these are genuinely separate work.' },
   D1: { severity: 'error', category: 'Xero coding',
     title: 'Actual spend with no Projects tag',
     action: 'Tag these in Xero. Untagged lines are dropped from every total.' },
@@ -81,12 +146,16 @@ const HEALTH_SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
 /**
  * @param {Array} budgets  from readAllBudgets()
  * @param {Array} actualLines  normalised Xero lines
- * @param {Object} ctx  { xeroConnected, exclusion: {count,total}, secretsMissing: [] }
+ * @param {Object} ctx  { now, xeroConnected, exclusion: {count,total}, secretsMissing: [],
+ *                       exclusivity: {reps, suppressed} }
  * @return {Array} findings, most severe first, and by value at risk within severity
  */
 function buildHealth(budgets, actualLines, ctx) {
   ctx = ctx || {};
   const out = [];
+  // Passed in rather than read from the clock, so the date-based checks (C4, C5, D5, D6,
+  // E2) are reproducible in a test.
+  const now = ctx.now ? new Date(ctx.now) : null;
 
   function add(id, fields) {
     const spec = HEALTH_CATALOGUE[id];
@@ -136,8 +205,17 @@ function buildHealth(budgets, actualLines, ctx) {
     }
 
     // --- A9: forecast for a milestone the budget no longer has ---
+    // Compare codes with codes. This used to key on the raw Inventory Item cell,
+    // which holds "CODE - Name", while forecast keys are the bare code - so it
+    // fired on every correctly coded sheet in the org and never on a real fault.
+    // Since parseForecastTab_ now resolves labels against the Budget tab before
+    // storing them, this should be unreachable: if it ever appears, a forecast key
+    // reached the snapshot without going through resolveForecastLabel_.
     const budgetItems = {};
-    (b.lines || []).forEach(l => { if (l.item) budgetItems[l.item] = true; });
+    (b.lines || []).forEach(l => {
+      const code = itemCode_(l.item);
+      if (code) budgetItems[code] = true;
+    });
     const forecastItems = {};
     ['cost', 'income'].forEach(kind => {
       const map = (b.forecast && b.forecast[kind]) || {};
@@ -159,7 +237,222 @@ function buildHealth(budgets, actualLines, ctx) {
       add('B5', withBase_(base, { detail: b5 +
         ' line(s) where Contribution does not equal Income minus Cost' }));
     }
+
+    // --- C1-C7: metadata. Every one of these was unimplementable until the sheets
+    // started carrying Owner, Status, Funding end and Contribution policy. ---
+    const missingKeys = (CONFIG.REQUIRED_META || []).filter(k => !meta[k]);
+    if (missingKeys.length) {
+      add('C1', withBase_(base, { detail: 'missing: ' + missingKeys.join(', ') }));
+    }
+
+    // The folder is what the code believes; the value is what a human wrote. When they
+    // disagree, one of them is reading a different story to the dashboard.
+    const declaredStatus = clean_(meta['status'] || '').toLowerCase();
+    if (declaredStatus && declaredStatus !== b.status) {
+      add('C2', withBase_(base, { detail: 'Funding_info says "' + declaredStatus +
+        '" but the sheet sits in the ' + b.status + '/ folder, which is what counts' }));
+    }
+
+    const declaredName = clean_(meta['funding source'] || '');
+    if (declaredName && declaredName !== b.name) {
+      add('C3', withBase_(base, { detail: 'Funding_info says "' + declaredName +
+        '" but the file is named "' + b.name + '". Actuals join on the file name.' }));
+    }
+
+    const reviewed = parseSheetDate_(meta['last reviewed']);
+    if (reviewed && now) {
+      const days = Math.round((now - reviewed) / 86400000);
+      if (days > (CONFIG.STALE_REVIEW_DAYS || 90)) {
+        add('C4', withBase_(base, { detail: 'last reviewed ' + days + ' days ago' }));
+      }
+    }
+
+    const fundingEnd = parseSheetDate_(meta['funding end']);
+    if (b.status === 'secured' && fundingEnd && now && fundingEnd < now) {
+      add('C5', withBase_(base, { detail: 'ended ' + isoDate_(fundingEnd) +
+        ' and is still in secured/' }));
+    }
+
+    const policy = clean_(meta['contribution policy'] || '');
+    if (!policy) {
+      add('C6', withBase_(base, { detail: 'no "contribution policy"' }));
+    } else if (!(CONFIG.CONTRIBUTION_POLICIES || []).some(re => re.test(policy))) {
+      add('C6', withBase_(base, { detail: '"' + policy + '" is not one of none, ' +
+        'per_line, percent_of_income:<n>' }));
+    }
+
+    if (b.status === 'proposed' && !meta['decision date'] && (b.lines || []).length) {
+      add('C7', withBase_(base, { detail: 'no "decision date"' }));
+    }
+
+    // --- G1: secured income beyond the work it pays for ---
+    // Two applications for the same thing both landing is a good problem, but it has to
+    // surface or the surplus is never reallocated. The same check catches income filed
+    // against the wrong milestone, and projected revenue misfiled as secured.
+    if (b.status === 'secured') {
+      var cost = 0, income = 0;
+      (b.lines || []).forEach(l => { cost += l.cost || 0; income += l.income || 0; });
+      if (income - cost > 1) {
+        add('G1', withBase_(base, { amount: Math.round(income - cost),
+          detail: 'secured income ' + Math.round(income) + ' exceeds budgeted cost ' +
+            Math.round(cost) + ' by ' + Math.round(income - cost) }));
+      }
+    }
+
+    // --- G2: a proposed ask with no stated probability ---
+    if (b.status === 'proposed' &&
+        sourceProbability_(b.status, meta) === null &&
+        (b.lines || []).length) {
+      add('G2', withBase_(base, { detail: 'no "' + CONFIG.META.probability +
+        '" in Funding_info, so this ask is absent from expected income' }));
+    }
+
+    // --- G3: cost suppressed because a competing application carries it ---
+    var supp = ((ctx || {}).exclusivity || {}).suppressed || {};
+    if (supp[b.name]) {
+      add('G3', withBase_(base, { detail: 'exclusivity group "' + supp[b.name].group +
+        '": the cost is counted on ' + supp[b.name].countedIn + ' instead, so this ' +
+        'sheet contributes its ask but not the work behind it' }));
+    }
   });
+
+  // --- Cross-source checks. These need every sheet at once, so they sit outside the
+  // per-budget loop above. ---
+  (function crossSource() {
+    const live = (budgets || []).filter(b => (b.lines || []).length);
+    const byName = {};
+    live.forEach(b => { byName[b.name] = b; });
+
+    // D3: spend with no item code falls out of the quarterly grid entirely.
+    let noItem = 0, noItemTotal = 0;
+    (actualLines || []).forEach(l => {
+      if (l.kind !== 'expense') return;
+      if (!itemCode_(l.item)) { noItem++; noItemTotal += Number(l.amount) || 0; }
+    });
+    if (noItem) {
+      add('D3', { detail: noItem + ' expense line(s) carry no Product/Service, so they ' +
+        'sit outside the quarterly tracking grid', amount: Math.round(noItemTotal) });
+    }
+
+    // D4 / D6: actuals pointing at a source that has no sheet, or at one that has ended.
+    // D6 is how a stale repeating payroll journal surfaces; nothing in Xero reports one.
+    const orphan = {}, afterEnd = {};
+    (actualLines || []).forEach(l => {
+      if (l.kind !== 'expense') return;
+      const fs = clean_(l.fundingSource || '');
+      if (!fs || startsWith_(fs, CONFIG.ARCHIVE_PREFIX)) return;
+      if (!byName[fs]) {
+        orphan[fs] = (orphan[fs] || 0) + (Number(l.amount) || 0);
+        return;
+      }
+      const end = parseSheetDate_((byName[fs].metadata || {})['funding end']);
+      if (end && l.date && new Date(l.date) > end) {
+        afterEnd[fs] = (afterEnd[fs] || 0) + (Number(l.amount) || 0);
+      }
+    });
+    Object.keys(orphan).forEach(fs => {
+      add('D4', { fundingSource: fs, amount: Math.round(orphan[fs]),
+        detail: 'Xero has spend tagged "' + fs + '" but no budget sheet of that name' });
+    });
+    Object.keys(afterEnd).forEach(fs => {
+      const b = byName[fs];
+      add('D6', { fundingSource: fs, project: b.projectFolder,
+        owner: (b.metadata || {})['owner'] || '', link: b.sheetUrl || '',
+        amount: Math.round(afterEnd[fs]),
+        detail: 'spend dated after Funding end ' +
+          isoDate_(parseSheetDate_((b.metadata || {})['funding end'])) });
+    });
+
+    // Actual spend per source, for D5, E1 and E2.
+    const spend = {};
+    (actualLines || []).forEach(l => {
+      if (l.kind !== 'expense') return;
+      const fs = clean_(l.fundingSource || '');
+      if (fs) spend[fs] = (spend[fs] || 0) + (Number(l.amount) || 0);
+    });
+
+    live.forEach(b => {
+      const meta = b.metadata || {};
+      const bse = { fundingSource: b.name, project: b.projectFolder,
+        owner: meta['owner'] || '', link: b.sheetUrl || '' };
+      const cost = (b.lines || []).reduce((a, l) => a + (l.cost || 0), 0);
+      const actual = spend[b.name] || 0;
+      const start = parseSheetDate_(meta['funding start']);
+      const end = parseSheetDate_(meta['funding end']);
+
+      // D5: a secured grant that has started and had nothing coded to it is almost
+      // always a Xero tag that does not match the sheet name.
+      if (b.status === 'secured' && start && now && start < now && actual === 0) {
+        add('D5', withBase_(bse, { amount: Math.round(cost),
+          detail: 'started ' + isoDate_(start) + ' with no actuals coded to it at all' }));
+      }
+
+      // E1: overspend against the sheet's own budget.
+      if (cost > 0 && actual > cost) {
+        add('E1', withBase_(bse, { amount: Math.round(actual - cost),
+          detail: 'actual ' + Math.round(actual) + ' against budget ' + Math.round(cost) }));
+      }
+
+      // E2: underspend. Only once a grant is meaningfully under way, and only when the
+      // gap between elapsed time and spent money is wide enough to be worth acting on.
+      if (cost > 0 && start && end && now && end > start) {
+        const elapsed = Math.min(1, Math.max(0, (now - start) / (end - start)));
+        const spent = actual / cost;
+        if (elapsed >= (CONFIG.UNDERSPEND_MIN_ELAPSED || 0.5) &&
+            (elapsed - spent) >= (CONFIG.UNDERSPEND_GAP || 0.25)) {
+          add('E2', withBase_(bse, { amount: Math.round(cost - actual),
+            detail: Math.round(elapsed * 100) + '% of the period elapsed, ' +
+              Math.round(spent * 100) + '% of the budget spent' }));
+        }
+      }
+    });
+
+    // E3: one item code in two sources means one cost billed to two funders. Codes are
+    // {SOURCE}_{NNN} precisely so this cannot happen by accident.
+    const codeOwners = {};
+    live.forEach(b => {
+      (b.lines || []).forEach(l => {
+        const code = itemCode_(l.item);
+        if (!code) return;
+        (codeOwners[code] = codeOwners[code] || {})[b.name] = true;
+      });
+    });
+    Object.keys(codeOwners).forEach(code => {
+      const owners = Object.keys(codeOwners[code]);
+      if (owners.length > 1) {
+        add('E3', { detail: 'item code "' + code + '" appears in ' + owners.join(' and ') });
+      }
+    });
+
+    // E4: the same description budgeted in two sources over overlapping dates. The
+    // undeclared twin of an Exclusivity group: G3 reports duplication you declared, this
+    // reports duplication you did not.
+    const byDesc = {};
+    live.forEach(b => {
+      (b.lines || []).forEach(l => {
+        const d = clean_(l.description || '').toLowerCase();
+        if (!d || !l.start || !l.end) return;
+        (byDesc[d] = byDesc[d] || []).push({ source: b.name, start: l.start, end: l.end,
+          cost: l.cost || 0, group: clean_((b.metadata || {})[CONFIG.META.exclusivityGroup] || '') });
+      });
+    });
+    Object.keys(byDesc).forEach(d => {
+      const rows = byDesc[d];
+      for (let i = 0; i < rows.length; i++) {
+        for (let j = i + 1; j < rows.length; j++) {
+          if (rows[i].source === rows[j].source) continue;
+          // Already declared as alternatives, so G3 covers it. Not a finding twice.
+          if (rows[i].group && rows[i].group === rows[j].group) continue;
+          if (rows[i].start <= rows[j].end && rows[j].start <= rows[i].end) {
+            add('E4', { amount: Math.round(Math.min(rows[i].cost, rows[j].cost)),
+              detail: '"' + d + '" is budgeted in both ' + rows[i].source + ' and ' +
+                rows[j].source + ' over overlapping dates' });
+            return; // one finding per description is enough to act on
+          }
+        }
+      }
+    });
+  })();
 
   // --- D1 / D2: Xero coding. An untagged line is silently dropped from totals. ---
   var noProject = 0, noProjectTotal = 0, noSource = 0, noSourceTotal = 0;
