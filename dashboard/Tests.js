@@ -531,6 +531,26 @@ function runTests() {
   check('admin: sees everything', admin._accessLevel === 'admin' &&
     admin.health.length === 5 && admin.projects.length === 2);
 
+  // ---- archiving actually archives ----------------------------------------
+  // Archiving happens in Drive; Xero keeps the original tracking name forever. Matching
+  // only on the prefix meant an archived sheet vanished from the dashboard while its
+  // spend stayed in the organisation totals with no budget beside it.
+  setArchivedSourceNames_({ 'WW_25_OLD': true });
+  check('archived: prefixed Xero tag still matches',
+    isArchivedSource_(CONFIG.ARCHIVE_PREFIX + 'WW_25_OLD') === true);
+  check('archived: bare Xero tag matches the name archived in Drive',
+    isArchivedSource_('WW_25_OLD') === true);
+  check('archived: a live source is untouched', isArchivedSource_('WW_25_TOI') === false);
+  check('archived: an empty tag is not archived, it is unassigned',
+    isArchivedSource_('') === false && isArchivedSource_(null) === false);
+
+  setArchivedSourceNames_({}); // shared global: leave it as it was found
+
+  // The folder is the status. Requiring a second copy only created something that
+  // could contradict it.
+  check('status is not a required metadata key',
+    (CONFIG.REQUIRED_META || []).indexOf('status') === -1);
+
   Logger.log(results.join('\n'));
   return results;
 }

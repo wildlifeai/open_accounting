@@ -15,9 +15,37 @@
  * category, so actual numbers are exact, not approximated.
  */
 
+/**
+ * Funding sources archived in Drive, keyed by the name Xero still knows them by.
+ *
+ * Set once per refresh by buildSnapshot. Apps Script gives the whole project one global
+ * scope, and this mirrors lastExclusionSummary() in XeroClient: a value established during
+ * the crawl that half a dozen later passes need, without threading an extra argument
+ * through six signatures that have nothing else to do with archiving.
+ */
+var ARCHIVED_SOURCE_NAMES = {};
+
+function setArchivedSourceNames_(names) { ARCHIVED_SOURCE_NAMES = names || {}; }
+
+/**
+ * One definition of "this funding source is archived", because there were nine.
+ *
+ * Matches either the Xero tag carrying the prefix, which happens only if somebody renamed
+ * the tracking option too, or the bare name appearing in the archived set built from Drive,
+ * which is what actually happens.
+ */
+function isArchivedSource_(name) {
+  const n = String(name == null ? '' : name);
+  if (!n) return false;
+  if (startsWith_(n, CONFIG.ARCHIVE_PREFIX)) return true;
+  return ARCHIVED_SOURCE_NAMES[n] === true;
+}
+
 function buildSnapshot() {
   const now = new Date();
   const fy = fyBounds_(now);
+  // Before any actual is bucketed: every pass below asks isArchivedSource_ about a tag.
+  setArchivedSourceNames_(readArchivedSourceNames());
 
   // The folder walk is not free: measured at ~13s of a ~60s refresh, because DriveApp
   // folder and file iterators are slow even though nothing is opened yet.
@@ -160,7 +188,7 @@ function buildSnapshot() {
     // so keeping its actuals guaranteed a mismatch: spend with no budget beside it,
     // inflating org actuals and making the whole organisation look overspent.
     // buildTimeline_ already filtered both, so the two views disagreed.
-    if (startsWith_(l.fundingSource || '', CONFIG.ARCHIVE_PREFIX)) return;
+    if (isArchivedSource_(l.fundingSource)) return;
     const p = project_(l.project);
     p.actualExpense += l.amount;
     
@@ -206,6 +234,7 @@ function buildSnapshot() {
 
   // Project planner timeline: milestone segments color-coded by funding status.
   const timeline = buildTimeline_(budgets, actualLines, itemToMilestone, fy, now);
+
 
   // Per-project rollups (feed the summary cards / org totals).
   const rows = Object.keys(projects).map(name => {
@@ -481,7 +510,7 @@ function buildTimeline_(budgets, actualLines, itemToMilestone, fy, now) {
   // Compute actual net per source for contribution entries
   var sourceActualNet = {};
   actualLines.forEach(function (l) {
-    if (!l.fundingSource || startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)) return;
+    if (!l.fundingSource || isArchivedSource_(l.fundingSource)) return;
     if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
     var pmKey = CONFIG.GENERAL_PROJECT + '||' + l.fundingSource + ' (contribution)';
     if (!byProjMile[pmKey]) return;
@@ -558,7 +587,7 @@ function buildTracking_(budgets, actualLines) {
   const incomeActuals = {};
   const actualNames = {}; // source||code -> Xero item name
   actualLines.forEach(l => {
-    if (!l.fundingSource || startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)) return;
+    if (!l.fundingSource || isArchivedSource_(l.fundingSource)) return;
     const q = quarterOfMonthKey_(DateMath.monthKey(new Date(l.date)));
     const code = itemCode_(l.item);
     const key = l.fundingSource + '||' + code;

@@ -205,10 +205,11 @@ function diagUnassigned(projectFilter) {
   lines.forEach(function (l) {
     if (l.kind !== 'expense') return;
     if (l.project !== projectFilter) return;
-    // Same logic as Aggregator.js line 103-104:
-    var fs = l.fundingSource && l.fundingSource.indexOf(CONFIG.ARCHIVE_PREFIX) !== 0
+    // isArchivedSource_ is the one definition of this, shared with Aggregator and
+    // HealthCheck. It used to be a line-number reference to a line that had moved.
+    var fs = l.fundingSource && !isArchivedSource_(l.fundingSource)
       ? l.fundingSource : null;
-    if (fs) return; // has a valid funding source — skip
+    if (fs) return; // has a live funding source, so it is not unassigned
 
     totalAmount += l.amount;
     unassigned.push({
