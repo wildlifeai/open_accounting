@@ -2,7 +2,7 @@
  * check_docs.js
  * Fails when the documentation disagrees with the code.
  *
- * Run with Node from the repo root: `node dashboard/check_docs.js`
+ * Run with Node from the repo root: `node tools/check_docs.js`
  *
  * Docs in this repo have drifted repeatedly and silently: GM_GUIDE said "Two tabs" when
  * there were four, dashboard/README's file list was missing two files, AGENTS.md listed a
@@ -10,10 +10,13 @@
  * existed. None of that is anyone's fault; prose has no compiler. This is the compiler.
  *
  * It runs in Node rather than Apps Script because it needs the filesystem, which is also
- * why it cannot live in Tests.js.
+ * why it cannot live in Tests.js. It lives in tools/ rather than dashboard/ because
+ * .claspignore is a whitelist that re-admits *.js: a Node script sitting in dashboard/
+ * gets swept into the Apps Script project, where require() does not exist.
  */
 const fs = require('fs');
 const path = require('path');
+const { scanSensitive, formatSensitive } = require('./sensitive');
 
 const ROOT = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -70,7 +73,7 @@ function ok(what) { console.log('  ok    ' + what); }
 (function fileList() {
   const doc = read('dashboard/README.md');
   const actual = fs.readdirSync(path.join(ROOT, 'dashboard'))
-    .filter(f => /\.(js|html)$/.test(f) && f !== 'check_docs.js');
+    .filter(f => /\.(js|html)$/.test(f));
   const undocumented = actual.filter(f => doc.indexOf('`' + f + '`') === -1)
     // The three UI files are documented as one grouped row.
     .filter(f => !/^(Index|Stylesheet|JavaScript)\.html$/.test(f) ||
@@ -122,8 +125,7 @@ function ok(what) { console.log('  ok    ' + what); }
   const docs = ['README.md', 'AGENTS.md', '.agents/skills/SKILL.md',
     'dashboard/README.md', 'dashboard/GM_GUIDE.md', 'dashboard/HEALTH_CHECKS.md',
     'dashboard/BUDGET_SHEET_TEMPLATE.md', 'dashboard/BUDGET_PROCEDURES_ADDENDUM.md',
-    'budget_templates/README.md', 'project_reports/README.md',
-    'funding_reports/xero-quickstart.md'];
+    'budget_templates/README.md', 'project_reports/README.md'];
   // Files deleted on purpose, which the docs still name because the lesson outlived the
   // code. SKILL.md's "two files both defined getFolderByName" is still worth knowing even
   // though one of them is gone. Listed explicitly so a genuinely broken reference to a file
@@ -146,6 +148,7 @@ function ok(what) { console.log('  ok    ' + what); }
 
   const dead = [];
   docs.forEach(d => {
+    if (!fs.existsSync(path.join(ROOT, d))) return;   // deleted docs are not broken docs
     const text = read(d);
     // Any backticked token that looks like a repo file path.
     [...text.matchAll(/`([A-Za-z0-9_./-]+\.(?:js|html|json|md|xlsx|csv))`/g)].forEach(m => {
@@ -168,57 +171,40 @@ function ok(what) { console.log('  ok    ' + what); }
 })();
 
 // ---------------------------------------------------------------- sensitive content
-// This is a public repository. The rule is that every figure in documentation and test
-// fixtures is invented, and the giveaway for a real one is precision: nobody invents
-// $66,710. So any money amount that is not a round hundred is treated as suspect until
-// it is either rounded or explicitly marked.
+// The public/private boundary, enforced. See tools/sensitive.js for the rule and why
+// precision is the signal. The same scanner runs in the commit-msg hook and in CI, so a
+// figure cannot reach the repository through a file, a commit message, or a merge.
 //
-// Deliberately does not list the real numbers it is looking for. A denylist of actual
-// salary figures in a public file would leak the very thing it guards.
+// This scans everything textual rather than a named list. It used to hold a list of
+// eleven files, which excluded the scanner's own source, every .html client file, and by
+// construction every file anyone would add later. On 2026-09-21 it was the scanner's own
+// docblock that carried an unrounded figure, and the list is why nothing noticed. An
+// allowlist cannot guard a repository: the leak is always in the file you did not list.
 (function sensitive() {
-  const scan = ['README.md', 'AGENTS.md', '.agents/skills/SKILL.md',
-    'dashboard/README.md', 'dashboard/GM_GUIDE.md', 'dashboard/HEALTH_CHECKS.md',
-    'dashboard/BUDGET_SHEET_TEMPLATE.md', 'dashboard/BUDGET_PROCEDURES_ADDENDUM.md',
-    'budget_templates/README.md', 'dashboard/Tests.js'];
+  const TEXT = /\.(md|js|html|json|ya?ml|txt|csv|sh)$/i;
+  const SKIP = /(^|[\\/])(\.git|node_modules|\.clasp\.json)([\\/]|$)/;
 
-  const ALLOWED_EMAILS = /^(someone|admin|a|b|you|name)@|@example\.(com|org)$/;
-  const oddMoney = [], personal = [], accounts = [];
-
-  scan.forEach(f => {
-    read(f).split('\n').forEach((line, i) => {
-      if (/INVENTED-OK/.test(line)) return;   // explicit escape hatch, use sparingly
-      const where = f + ':' + (i + 1);
-
-      // $12,345 or $12345, and bare 5-6 digit numbers in fixtures.
-      [...line.matchAll(/\$\s?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,7})(?:\.[0-9]{2})?/g)]
-        .forEach(m => {
-          const n = parseInt(m[1].replace(/,/g, ''), 10);
-          if (n >= 1000 && n % 100 !== 0) oddMoney.push(where + '  $' + m[1]);
-        });
-
-      [...line.matchAll(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)].forEach(m => {
-        if (!ALLOWED_EMAILS.test(m[0])) personal.push(where + '  ' + m[0]);
-      });
-
-      // NZ bank account, and anything shaped like one.
-      if (/\b\d{2}-\d{3,4}-\d{6,7}-\d{2,3}\b/.test(line)) accounts.push(where);
+  const files = [];
+  (function walk(dir) {
+    fs.readdirSync(path.join(ROOT, dir || '.'), { withFileTypes: true }).forEach(e => {
+      const rel = dir ? dir + '/' + e.name : e.name;
+      if (SKIP.test(rel)) return;
+      if (e.isDirectory()) return walk(rel);
+      // .githooks/pre-commit and friends are shell scripts with no extension.
+      if (!TEXT.test(rel) && !/^\.githooks\//.test(rel)) return;
+      files.push(rel);
     });
-  });
+  })('');
 
-  if (accounts.length) fail('bank-account-shaped strings', accounts.join(', '));
-  else ok('no bank-account-shaped strings');
-
-  if (personal.length) {
-    fail(personal.length + ' personal email address(es) in a public repo',
-      [...new Set(personal)].join('\n        ') +
-      '\n        Use someone@wildlife.ai, or add to ALLOWED_EMAILS if it is a fixture.');
-  } else ok('no personal email addresses outside the allowed placeholders');
-
-  if (oddMoney.length) {
-    fail(oddMoney.length + ' money figure(s) precise enough to look real',
-      [...new Set(oddMoney)].join('\n        ') +
-      '\n        Round them, or append INVENTED-OK to the line if genuinely made up.');
-  } else ok('every money figure in docs and fixtures is a round hundred');
+  const findings = [];
+  files.forEach(f => findings.push(...scanSensitive(read(f), f)));
+  if (findings.length) {
+    const indented = formatSensitive(findings).trim().split(String.fromCharCode(10))
+      .join(String.fromCharCode(10) + '        ');
+    fail(findings.length + ' possible piece(s) of content in a structure repo', indented);
+  } else {
+    ok('no amounts, personal emails or account numbers in ' + files.length + ' text file(s)');
+  }
 })();
 
 console.log();

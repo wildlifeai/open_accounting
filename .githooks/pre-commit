@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run the documentation checker before every commit.
+#
+# The checker only helps if it runs, and "remember to run it" is not a mechanism. It is
+# fast, offline, and needs no Drive or Xero access, so there is no reason not to.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+node tools/check_docs.js || {
+  echo ""
+  echo "Commit blocked by tools/check_docs.js."
+  echo "Fix the findings above, or bypass deliberately with: git commit --no-verify"
+  exit 1
+}
