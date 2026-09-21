@@ -116,7 +116,7 @@ function buildSnapshot() {
       if (!budgetByKey[bkey]) {
         budgetByKey[bkey] = { budget: 0, income: 0, status: src.status,
           budgetFY: 0, incomeFY: 0, budgetByQ: {}, incomeByQ: {}, weightedByQ: {},
-          start: null, end: null };
+          comment: '', start: null, end: null };
       }
       const entry = budgetByKey[bkey];
       // costFactor is 0 when a competing application in the same exclusivity group carries
@@ -133,6 +133,9 @@ function buildSnapshot() {
       if (probability !== null) {
         addInto_(entry.weightedByQ,
                  scaleMap_(bucketToQuarters(lineIncByMonth), probability));
+      }
+      if (!entry.comment && code && src.forecast && src.forecast.comments) {
+        entry.comment = src.forecast.comments[code] || '';
       }
       if (l.start && (!entry.start || l.start < new Date(entry.start)))
         entry.start = isoOrNull_(l.start);
@@ -289,7 +292,8 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, actualByKe
     const source = parts[1];
     const milestone = parts[2] || '(unassigned)';
     const b = budgetByKey[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0,
-      budgetByQ: {}, incomeByQ: {}, weightedByQ: {}, start: null, end: null };
+      budgetByQ: {}, incomeByQ: {}, weightedByQ: {}, comment: '',
+      start: null, end: null };
     const status = (b.status || sourceStatus[source] || 'unknown');
     return {
       project: project,
@@ -306,10 +310,15 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, actualByKe
       // for secured sources and is empty otherwise, matching the scalar above.
       budgetByQ: roundMapValues_(b.budgetByQ || {}),
       securedByQ: status === 'secured' ? roundMapValues_(b.incomeByQ || {}) : {},
+      // Income from a source that is still an application. Kept separate from secured so
+      // the five-year plan can show committed and hoped-for money in different columns
+      // rather than blending them into one number nobody can act on.
+      proposedByQ: status === 'proposed' ? roundMapValues_(b.incomeByQ || {}) : {},
       actualByQ: roundMapValues_(actualByKeyQ[key] || {}),
       // Secured in full plus proposed at its probability. What we expect to have, as
       // opposed to what is committed.
       weightedByQ: roundMapValues_(b.weightedByQ || {}),
+      comment: b.comment || '',
       start: b.start || null,
       end: b.end || null
     };
@@ -400,14 +409,20 @@ function buildTimeline_(budgets, actualLines, itemToMilestone, fy, now) {
       const pmKey = pName + '||' + mile;
       if (!byProjMile[pmKey]) byProjMile[pmKey] = { project: pName, milestone: mile, segments: [], actualExpense: 0 };
 
+      // Income as well as cost, so the planner can offer Cost / Income / Profit and loss
+      // per milestone. Profit and loss is derived in the client rather than stored: it is
+      // income minus cost, and storing a third series invites the three to disagree.
       const monthlyCost = distributeByMonth_([l], 'cost');
+      const monthlyIncome = distributeByMonth_([l], 'income');
       byProjMile[pmKey].segments.push({
         source: src.name,
         status: src.status,
         start: l.start ? DateMath.monthKey(l.start) : null,
         end: l.end ? DateMath.monthKey(l.end) : null,
         cost: round_(l.cost),
-        monthlyCost: roundMapValues_(monthlyCost)
+        income: round_(l.income),
+        monthlyCost: roundMapValues_(monthlyCost),
+        monthlyIncome: roundMapValues_(monthlyIncome)
       });
     });
   });
@@ -500,9 +515,34 @@ function buildTimeline_(budgets, actualLines, itemToMilestone, fy, now) {
   }).sort((a, b) => a.project.localeCompare(b.project) || a.milestone.localeCompare(b.milestone));
 }
 
+/**
+ * Round every value, and preserve the total while doing it.
+ *
+ * Rounding each entry independently drifts: a $12,000 line day-weighted across four
+ * quarters gives four values near x.5, which round to $12,001 (INVENTED-OK). Consumers
+ * maps then shows a total a few dollars off the budget it came from, and nobody can
+ * explain the difference.
+ *
+ * Largest remainder: round everything, then push the shortfall onto the entries whose
+ * fractions sat closest to the boundary, so the map always sums to its unrounded total.
+ */
 function roundMapValues_(map) {
-  var out = {};
-  Object.keys(map).forEach(k => (out[k] = Math.round(map[k])));
+  const keys = Object.keys(map || {});
+  const out = {};
+  let sum = 0;
+  keys.forEach(k => { out[k] = Math.round(map[k]); sum += out[k]; });
+
+  let diff = Math.round(keys.reduce((a, k) => a + map[k], 0)) - sum;
+  if (diff !== 0 && keys.length) {
+    const frac = k => map[k] - Math.floor(map[k]);
+    // Adding? Take the entries rounded down hardest. Removing? Those rounded up hardest.
+    const order = keys.slice().sort((a, b) => diff > 0 ? frac(b) - frac(a) : frac(a) - frac(b));
+    for (let i = 0; diff !== 0 && i < order.length; i++) {
+      const step = diff > 0 ? 1 : -1;
+      out[order[i]] += step;
+      diff -= step;
+    }
+  }
   return out;
 }
 
