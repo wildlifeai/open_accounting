@@ -282,11 +282,15 @@ function buildHealth(budgets, actualLines, ctx) {
         ' and is still in secured/' }));
     }
 
-    const policy = clean_(meta['contribution policy'] || '');
-    if (!policy) {
+    // The value is reported back exactly as typed, and matched after normalising.
+    // A check that accepts "none" and rejects "None" sends somebody hunting through a
+    // sheet that was already right, which is worse than no check at all.
+    const policyRaw = clean_(meta['contribution policy'] || '');
+    if (!policyRaw) {
       add('C6', withBase_(base, { detail: 'no "contribution policy"' }));
-    } else if (!(CONFIG.CONTRIBUTION_POLICIES || []).some(re => re.test(policy))) {
-      add('C6', withBase_(base, { detail: '"' + policy + '" is not one of none, ' +
+    } else if (!(CONFIG.CONTRIBUTION_POLICIES || [])
+        .some(re => re.test(normalisePolicy_(policyRaw)))) {
+      add('C6', withBase_(base, { detail: '"' + policyRaw + '" is not one of none, ' +
         'per_line, percent_of_income:<n>' }));
     }
 
@@ -514,6 +518,18 @@ function healthToFlags(health) {
     .map(f => (f.severity === 'error' ? '[error] ' : '[warning] ') +
       (f.fundingSource ? f.fundingSource + ': ' : '') + f.title +
       (f.detail ? ' - ' + f.detail : ''));
+}
+
+/**
+ * Fold the spellings a person actually types onto the three policy tokens.
+ * Every rule here maps a spelling onto the same meaning, never one meaning onto
+ * another: "40%" stays rejected, because it is a different statement from
+ * percent_of_income:40 and guessing which was meant is not the checker's job.
+ */
+function normalisePolicy_(value) {
+  return clean_(value).toLowerCase()
+    .replace(/[\s-]+/g, '_')  // "Per line" and "per-line" are both per_line
+    .replace(/_*:_*/g, ':');  // "percent of income: 40" is percent_of_income:40
 }
 
 function withBase_(base, fields) {

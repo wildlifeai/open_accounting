@@ -683,6 +683,27 @@ function runTests() {
   check('F6 stays quiet when there are none',
     hClean.filter(function (f) { return f.id === 'F6'; }).length === 0);
 
+  // ---- C6 accepts the spellings people type --------------------------------
+  function policyOk(v) {
+    return (CONFIG.CONTRIBUTION_POLICIES || [])
+      .some(function (re) { return re.test(normalisePolicy_(v)); });
+  }
+  check('policy: the three canonical tokens pass',
+    policyOk('none') && policyOk('per_line') && policyOk('percent_of_income:40'));
+  check('policy: capitals do not decide whether a sheet is right',
+    policyOk('None') && policyOk('PER_LINE') && policyOk('Percent_Of_Income:40'));
+  check('policy: a space or hyphen reads as an underscore',
+    policyOk('per line') && policyOk('Per-Line'));
+  check('policy: a space after the colon is still a percentage',
+    policyOk('percent of income: 40') && policyOk('Percent of income : 12.5'));
+  check('policy: surrounding whitespace is ignored',
+    policyOk('  none  '));
+  // Normalising spellings must not start guessing at meanings.
+  check('policy: a different statement is still rejected',
+    policyOk('40%') === false && policyOk('all_income_contributes') === false &&
+    policyOk('') === false);
+  check('policy: a percentage still needs a number',
+    policyOk('percent_of_income:') === false && policyOk('percent_of_income:abc') === false);
 
   Logger.log(results.join('\n'));
   return results;
