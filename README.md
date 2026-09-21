@@ -104,7 +104,6 @@ Ranked by how badly they hurt the persona who depends on them:
 | — effect on budget procedures | [`dashboard/BUDGET_PROCEDURES_ADDENDUM.md`](dashboard/BUDGET_PROCEDURES_ADDENDUM.md) |
 | Importable sheet templates | [`budget_templates/README.md`](budget_templates/README.md) |
 | `PROJECT_overview` sheet aggregator | [`project_reports/README.md`](project_reports/README.md) — predates the cockpit and overlaps requirement 10 |
-| Funding reports (Xero) | [`funding_reports/xero-quickstart.md`](funding_reports/xero-quickstart.md) |
 
 `CLAUDE.md` is just `@AGENTS.md`, so AI assistants and developers read the same guide.
 

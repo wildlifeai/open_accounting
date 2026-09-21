@@ -334,15 +334,22 @@ deprecated the broad scopes (available until September 2027) in favour of granul
 `accounting.manualjournals.read`; scopes are additive and cannot be removed from a live token
 without re-consent, so plan changes rather than making them casually.
 
-## Manual journals — payroll
+## Payroll
 
-Payroll is posted as **recurring biweekly manual journals per employee**, and manual journals are
-**not currently fetched**. Salaries therefore do not appear in actuals — understating spend, which
-is the dangerous direction, because under-spend reads as good news.
+**Changed 2026-09-21.** Payroll now posts through Xero Payroll as bills and bank transactions,
+both of which `fetchXeroActuals` already reads, so salaries do reach the cockpit. It was
+previously recurring biweekly manual journals per employee, which nothing fetched.
 
-Findings below came from official Xero documentation but the adversarial verification pass did
-**not** complete. Treat them as well-sourced and unconfirmed; one live paged call settles all of
-it. `dashboard/Probe.js` (if present) does exactly that.
+**Fetching is not the same as counting.** `Aggregator.js` drops any actual line carrying no
+`Projects` tracking value before it reaches a single total, so an untagged payroll bill is
+invisible in exactly the way an unfetched journal was, and just as silently. Health check **D1**
+puts a figure on untagged spend, **D2** on spend missing `Funding source`. Read both after a
+refresh before trusting any total that ought to contain salary. **This has not been confirmed
+against a live refresh**, so treat "payroll is captured" as reported, not verified.
+
+The manual-journal findings below are kept for the day something still has to be read from
+journals. They came from official Xero documentation, the adversarial verification pass did
+**not** complete, and they are therefore well-sourced and unconfirmed.
 
 * `ManualJournalLine` **does** carry `Tracking` (field name singular, same accessor as invoice
   lines), max 2 categories — which is exactly `Projects` + `Funding source`.
@@ -398,7 +405,9 @@ they are fixed.
   regression, so capture the before/after.
 * **`OVERHEAD_ACCOUNT`, `REVENUE_ACCOUNTS` and `DEFERRED_ACCOUNT` are still dead configuration** —
   declared, never read.
-* **Payroll manual journals are not fetched** (§4).
+* ~~**Payroll manual journals are not fetched.**~~ **Superseded 2026-09-21**: payroll moved to
+  Xero Payroll bills, which are fetched. Whether those bills carry `Projects` tracking is
+  unconfirmed, and D1 is the check that answers it (§4).
 * **The invoice fetcher counts DRAFT and SUBMITTED invoices** as actuals — it excludes only
   DELETED and VOIDED.
 * **Quarterly budget generation depends on a tab the dashboard has retired.**
@@ -411,25 +420,42 @@ they are fixed.
   the retired tracking tab. Migrating the quarterly script onto the `Budget` tab is the fix — and
   the maths it would need already exists in `ForecastEngine.js`, which day-weights `Cost` and
   `Income` across `Start`..`End` and has quarterly helpers.
-* **Duplicated infrastructure across projects.** Three separate Xero OAuth2 clients
-  (`dashboard/XeroClient.js`, `project_reports/create_quarterly_budgets.js`,
-  `funding_reports/xero-integration.js`), two independent crawlers of the same Budgets Drive tree
-  (`dashboard/BudgetReader.js`, `create_quarterly_budgets.js`), four files hardcoding the same
-  chart-of-accounts spreadsheet id, and two implementations of April-start financial-year quarter
-  maths. Each duplicate is a place the definition of a budget can drift. See §8 for why they are
-  separate Apps Script projects and what should be shared.
-* **A third remote loader is still present**: `funding_reports/loader-template.js`, cache key
-  `XERO_SCRIPT_CACHE`, pointed at `refs/heads/main/funding_reports/xero-integration.js`, which is
-  module-wrapped as `XeroIntegration(config)`. It must be removed the same way the other two were.
-* **`funding_reports/,gitignore`** is misnamed — a comma instead of a dot — so the file intended to
-  stop credentials being committed does nothing.
+* ~~**Duplicated infrastructure across projects.**~~ **Largely resolved.** There was one Xero
+  OAuth2 client per project and two independent crawlers of the same Drive tree, each a place the
+  definition of a budget could drift. `dashboard/XeroClient.js` is now the only Xero client:
+  quarterly generation was retired on 2026-08-11 and `funding_reports/` was deleted on 2026-08-14.
+  What remains is the root-level chart-of-accounts helpers. See §8 for why the projects are separate.
+* ~~**A third remote loader is still present.**~~ **Resolved 2026-08-14.** It lived in
+  `funding_reports/`, cached under `XERO_SCRIPT_CACHE`, and fetched its code from a GitHub raw URL
+  at runtime. The whole directory was deleted: its Xero client was superseded by the cockpit's, and
+  it read two tabs the sheet schema now rejects outright (checked by A3). That also removed a
+  misnamed `,gitignore` — a comma instead of a dot — which meant the file meant to stop credentials
+  being committed had never done anything.
 * **`general_valid_accounts.js` and `variance_funding_source.js`** both define
   `updateAccountValidation()` and differ by ~29 lines. Near-duplicates sharing a global name.
 * **Working capital and cash are not modelled at all**, and the current scopes cannot reach the
   balance sheet. Board reporting needs both.
+* **Runway is not computed.** Decided 2026-09-21: the cockpit will report *funded* runway, not cash
+  runway. A month-by-month cumulative walk of income against spend, actuals behind and budget
+  ahead, reporting the first month cumulative net turns negative rather than dividing by an average
+  burn rate, because grant income arrives in tranches lumpy enough to make that division lie. Three
+  lines: secured as the floor, probability-weighted as the expected case, all-proposed as the
+  ceiling, so the spread between their crossover months states fundraising urgency in months.
+  Org-wide, on the Overview. **Cash runway is deliberately out of scope**: it needs
+  `accounting.reports.read`, a Xero re-consent and a balance-sheet read, and scopes cannot be
+  removed from a live token without re-consent, so adding one is not a casual change.
+* **Nothing reports a dead refresh trigger.** On 2026-09-21 the snapshot file in Drive was
+  seven days old against a six-hour trigger, roughly 28 consecutive missed runs, and the only
+  symptom was a "last synced" label that reads as information rather than an alarm. There is no
+  health check for it. A dashboard serving week-old numbers confidently is worse than one that is
+  plainly broken, because nobody re-reads a figure they have no reason to doubt. `refreshSnapshot`
+  calls `setContent` on every run, so the Drive file's `modifiedTime` is a reliable record of the
+  last successful refresh and is what such a check should read.
 * **No period freezing.** The snapshot cache is a performance cache, not an audit record. A figure
   reported to the board in August cannot currently be reproduced in November.
-* **No `.gitattributes`** (§1).
+* ~~**No `.gitattributes`.**~~ **Resolved 2026-08-11**; §1 describes what it pins and why. This
+  bullet contradicted §1 for six weeks, which is the argument for `check_docs.js` growing a check
+  that reads prose claims about the repo's own state, not just ids and file lists.
 
 ---
 
@@ -563,8 +589,7 @@ Order of work:
    `general_valid_accounts.js` / `variance_funding_source.js`, which both define
    `updateAccountValidation()` and differ by ~29 lines. Confirm nothing deployed still runs them
    before deleting.
-3. Remove the third remote loader in `funding_reports/` (§5) and decide whether
-   `xero-integration.js` is also superseded by the cockpit's Xero client.
+3. ~~Remove the third remote loader.~~ Done 2026-08-14: `funding_reports/` deleted entirely.
 4. Once the legacy paths are gone, the duplication in §5 largely resolves itself — the chart of
    accounts id, the FY-quarter maths and the Xero client end up defined once, in the cockpit. Only
    consider a shared Apps Script library if something outside the cockpit still needs them.
