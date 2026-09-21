@@ -531,6 +531,80 @@ function runTests() {
   check('admin: sees everything', admin._accessLevel === 'admin' &&
     admin.health.length === 5 && admin.projects.length === 2);
 
+  // ---- funded runway -------------------------------------------------------
+  // The invariant that matters is ordering: secured must run out no later than weighted,
+  // and weighted no later than all-proposed. If that ever inverts, the chart is telling a
+  // board that winning more money shortened the runway.
+  var rwNow = new Date(2026, 5, 15); // 2026-06
+  function mSrc(name, status, meta, lines) {
+    return { name: name, status: status, metadata: meta || {}, lines: lines };
+  }
+  function mLine(y, m, cost, income) {
+    return { start: new Date(y, m - 1, 1), end: new Date(y, m, 0),
+      cost: cost, income: income, milestone: 'M', project: 'P' };
+  }
+
+  var rwBudgets = [
+    mSrc('A', 'secured', {}, [
+      mLine(2026, 6, 0, 10000),
+      mLine(2026, 6, 4000, 0), mLine(2026, 7, 4000, 0), mLine(2026, 8, 4000, 0),
+      mLine(2026, 9, 4000, 0), mLine(2026, 10, 4000, 0)
+    ]),
+    mSrc('B', 'proposed', { probability: 50 }, [mLine(2026, 8, 0, 8000)])
+  ];
+  var rw = buildRunway_(rwBudgets, [], rwNow, {});
+
+  check('runway: secured crosses first', rw.crossover.secured === '2026-08');
+  check('runway: weighted crosses later', rw.crossover.weighted === '2026-09');
+  check('runway: all-proposed crosses last', rw.crossover.proposed === '2026-10');
+  check('runway: months counted from the current month',
+    rw.monthsOfRunway.secured === 2 && rw.monthsOfRunway.weighted === 3 &&
+    rw.monthsOfRunway.proposed === 4);
+  check('runway: ordering holds, secured <= weighted <= proposed',
+    rw.monthsOfRunway.secured <= rw.monthsOfRunway.weighted &&
+    rw.monthsOfRunway.weighted <= rw.monthsOfRunway.proposed);
+  check('runway: opens at zero when there is no history', rw.openingNet === 0);
+  check('runway: with no actuals every row is forecast',
+    rw.months.length === 5 && rw.months.every(function (r) { return !r.actual; }));
+
+  // A proposed source with no Probability is unknown, not zero: it must lift the
+  // all-proposed ceiling while leaving the weighted line exactly where secured is.
+  var rwNoProb = buildRunway_([
+    mSrc('A', 'secured', {}, [mLine(2026, 6, 4000, 0), mLine(2026, 7, 4000, 0)]),
+    mSrc('B', 'proposed', {}, [mLine(2026, 6, 0, 9000)])
+  ], [], rwNow, {});
+  check('runway: no Probability leaves weighted level with secured',
+    rwNoProb.crossover.weighted === rwNoProb.crossover.secured &&
+    rwNoProb.crossover.weighted === '2026-06');
+  check('runway: no Probability still lifts the all-proposed ceiling',
+    rwNoProb.crossover.proposed === null);
+
+  // Actuals behind, budget ahead: months before this one collapse into openingNet.
+  var rwActuals = buildRunway_(rwBudgets, [
+    { date: new Date(2026, 4, 10), amount: 3000, kind: 'expense',
+      project: 'P', fundingSource: 'A', item: '' },
+    { date: new Date(2026, 4, 12), amount: 5000, kind: 'income',
+      project: 'P', fundingSource: 'A', item: '' }
+  ], rwNow, {});
+  check('runway: openingNet is income minus spend before this month',
+    rwActuals.openingNet === 2000);
+  check('runway: past months are flagged actual',
+    rwActuals.months[0].month === '2026-05' && rwActuals.months[0].actual === true);
+  check('runway: a positive opening pushes the crossover out',
+    rwActuals.crossover.secured === '2026-09');
+
+  // An archived source must not reach runway, or it would disagree with the org cards.
+  var rwArch = buildRunway_(rwBudgets, [
+    { date: new Date(2026, 4, 10), amount: 9999, kind: 'expense',
+      project: CONFIG.ARCHIVE_PREFIX + 'Old', fundingSource: 'A', item: '' }
+  ], rwNow, {});
+  check('runway: archived project actuals are excluded', rwArch.openingNet === 0);
+
+  check('runway: months counted across a year boundary',
+    monthsUntil_('2026-11', '2027-02') === 3);
+  check('runway: no crossover reports null, not zero',
+    monthsUntil_('2026-06', null) === null);
+
   // ---- archiving actually archives ----------------------------------------
   // Archiving happens in Drive; Xero keeps the original tracking name forever. Matching
   // only on the prefix meant an archived sheet vanished from the dashboard while its
@@ -544,6 +618,14 @@ function runTests() {
   check('archived: an empty tag is not archived, it is unassigned',
     isArchivedSource_('') === false && isArchivedSource_(null) === false);
 
+  var rwArchName = buildRunway_([
+    mSrc('A', 'secured', {}, [mLine(2026, 6, 4000, 0)])
+  ], [
+    { date: new Date(2026, 4, 10), amount: 7777, kind: 'expense',
+      project: 'P', fundingSource: 'WW_25_OLD', item: '' }
+  ], rwNow, {});
+  check('archived: spend on an archived source stays out of runway',
+    rwArchName.openingNet === 0);
   setArchivedSourceNames_({}); // shared global: leave it as it was found
 
   // The folder is the status. Requiring a second copy only created something that
