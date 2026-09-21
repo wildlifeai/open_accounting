@@ -141,7 +141,12 @@ const HEALTH_CATALOGUE = {
     action: 'Set them in Project Settings > Script Properties.' },
   F5: { severity: 'info', category: 'System',
     title: 'Refresh summary',
-    action: '' }
+    action: '' },
+  F6: { severity: 'info', category: 'System',
+    title: 'Unapproved Xero documents skipped',
+    action: 'Approve them in Xero to have them count. Drafts are not on the ledger, ' +
+            'so Xero\'s own reports ignore them too. A draft bill understates spend ' +
+            'and flatters runway; a draft invoice does the reverse.' }
 };
 
 const HEALTH_SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
@@ -149,7 +154,8 @@ const HEALTH_SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
 /**
  * @param {Array} budgets  from readAllBudgets()
  * @param {Array} actualLines  normalised Xero lines
- * @param {Object} ctx  { now, xeroConnected, exclusion: {count,total}, secretsMissing: [],
+ * @param {Object} ctx  { now, xeroConnected, exclusion: {count,total},
+ *                       unposted: {count,total}, secretsMissing: [],
  *                       exclusivity: {reps, suppressed} }
  * @return {Array} findings, most severe first, and by value at risk within severity
  */
@@ -487,6 +493,11 @@ function buildHealth(budgets, actualLines, ctx) {
     countLines_(budgets) + ' budget line(s) parsed, ' +
     (actualLines || []).length + ' actual line(s) after excluding ' + excl.count +
     ' on balance-sheet accounts (' + excl.total + ')' });
+  const unp = ctx.unposted || { count: 0, total: 0 };
+  if (unp.count) {
+    add('F6', { detail: unp.count + ' document(s) in draft or awaiting approval, ' +
+      'totalling ' + Math.round(unp.total), amount: Math.round(unp.total) });
+  }
 
   out.sort(function (a, b) {
     const s = HEALTH_SEVERITY_RANK[a.severity] - HEALTH_SEVERITY_RANK[b.severity];

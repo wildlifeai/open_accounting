@@ -136,6 +136,7 @@ duplication you *did* declare, via `Exclusivity group`.
 | F1 | error | Xero not connected or token invalid | Run the reconnect step; actuals are stale meanwhile. |
 | F3 | error | Required Script Properties missing | Name which. |
 | F5 | info | Last refresh time, duration, sheets read, lines parsed | Trend tells you when the 6-minute limit is approaching. |
+| F6 | info | Xero documents skipped because they are still in draft or awaiting approval | Approve them in Xero to have them count. Drafts are not on the ledger, so Xero's own reports ignore them too. A draft bill understates spend and flatters runway; a draft invoice does the reverse. Voided and deleted documents are not counted here: they are decisions somebody already made, not a queue to clear. |
 
 ## UI
 

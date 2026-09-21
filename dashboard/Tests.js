@@ -633,6 +633,57 @@ function runTests() {
   check('status is not a required metadata key',
     (CONFIG.REQUIRED_META || []).indexOf('status') === -1);
 
+  // ---- only approved documents are actuals --------------------------------
+  // The load-bearing one is DRAFT income: it was counted here, Xero's own P&L never
+  // counted it, and on the runway chart it bought months that did not exist.
+  check('posted: an authorised invoice counts',
+    isPosted_('Invoices', 'AUTHORISED') === true);
+  check('posted: a paid invoice counts',
+    isPosted_('Invoices', 'PAID') === true);
+  check('posted: a DRAFT invoice does not count',
+    isPosted_('Invoices', 'DRAFT') === false);
+  check('posted: a SUBMITTED invoice does not count',
+    isPosted_('Invoices', 'SUBMITTED') === false);
+  check('posted: voided and deleted invoices still do not count',
+    isPosted_('Invoices', 'VOIDED') === false && isPosted_('Invoices', 'DELETED') === false);
+  check('posted: an authorised bank transaction counts',
+    isPosted_('BankTransactions', 'AUTHORISED') === true);
+  check('posted: a deleted bank transaction does not count',
+    isPosted_('BankTransactions', 'DELETED') === false);
+  // An allowlist, so a status nobody has considered stays out of the money.
+  check('posted: an unrecognised status is not assumed to be on the ledger',
+    isPosted_('Invoices', 'SOME_NEW_XERO_STATUS') === false);
+  check('posted: a missing status is not assumed to be on the ledger',
+    isPosted_('Invoices', null) === false && isPosted_('Invoices', '') === false);
+  check('posted: case does not decide whether money counts',
+    isPosted_('Invoices', 'authorised') === true);
+  // The opposite failure: a future fetcher whose collection has no policy yet must
+  // return its rows, not silently return none.
+  check('posted: a collection with no status policy passes through',
+    isPosted_('CreditNotes', 'AUTHORISED') === true &&
+    isPosted_('CreditNotes', null) === true);
+
+  // Cancelled is not unposted. Only one of the two is a queue somebody can clear.
+  check('cancelled: voided and deleted are cancelled',
+    isCancelled_('VOIDED') === true && isCancelled_('DELETED') === true);
+  check('cancelled: a draft is not cancelled, it is waiting',
+    isCancelled_('DRAFT') === false && isCancelled_('SUBMITTED') === false);
+  check('cancelled: an approved document is not cancelled',
+    isCancelled_('AUTHORISED') === false && isCancelled_(null) === false);
+
+  // F6 reports the draft pile only when there is one, so a tidy org sees no finding.
+  var hUnp = buildHealth([], [], { now: d(2026, 6, 15), xeroConnected: true,
+    exclusion: { count: 0, total: 0 }, unposted: { count: 2, total: 1234 },
+    secretsMissing: [] });
+  check('F6 reports drafts when some exist',
+    hUnp.filter(function (f) { return f.id === 'F6'; }).length === 1);
+  var hClean = buildHealth([], [], { now: d(2026, 6, 15), xeroConnected: true,
+    exclusion: { count: 0, total: 0 }, unposted: { count: 0, total: 0 },
+    secretsMissing: [] });
+  check('F6 stays quiet when there are none',
+    hClean.filter(function (f) { return f.id === 'F6'; }).length === 0);
+
+
   Logger.log(results.join('\n'));
   return results;
 }

@@ -275,6 +275,7 @@ function buildSnapshot() {
     now: now,
     xeroConnected: xeroOk,
     exclusion: lastExclusionSummary(),
+    unposted: lastUnpostedSummary(),
     secretsMissing: secretsMissing,
     // So G3 can name which source had its cost suppressed and which carries it instead.
     exclusivity: { reps: exclusivityReps, suppressed: costSuppressed }

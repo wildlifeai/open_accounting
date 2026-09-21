@@ -149,6 +149,7 @@ function fetchXeroActuals(sinceDate) {
     sinceDate, 'UTC', "yyyy-MM-dd'T'HH:mm:ss") : null;
   const lines = [];
 
+  _lastUnposted = { count: 0, total: 0 };
   lines.push.apply(lines, fetchBankTransactionLines_(modifiedHeader));
   lines.push.apply(lines, fetchInvoiceLines_(modifiedHeader));
 
@@ -206,6 +207,55 @@ function isExcludedAccount_(accountLabel) {
   return m ? Object.prototype.hasOwnProperty.call(excludedCodes_(), m[1]) : false;
 }
 
+// ---- Unposted and cancelled documents --------------------------------------
+// A Xero invoice only reaches the general ledger once it is approved. DRAFT and
+// SUBMITTED (awaiting approval) sit outside it, which is why Xero's own P&L and
+// tracking-category reports ignore them. The invoice fetcher excluded DELETED and
+// VOIDED only, so a draft counted here and nowhere in Xero, and the two could never
+// be reconciled against each other.
+//
+// It matters most to runway. A draft sales invoice is income nobody has agreed to
+// pay yet; counting it as actual income pushes the crossover month later, which is
+// the flattering direction and the one worth being strict about.
+//
+// Bank transactions carried the same trap in a smaller form: their only statuses are
+// AUTHORISED and DELETED, and status was not looked at there at all.
+//
+// An allowlist rather than a denylist, for the same reason the docs checker stopped
+// using one: a status nobody has thought about stays out of the numbers until
+// somebody decides what it means.
+
+const POSTED_STATUS = {
+  // The full set is DRAFT, SUBMITTED, AUTHORISED, PAID, VOIDED, DELETED.
+  Invoices: { AUTHORISED: true, PAID: true },
+  BankTransactions: { AUTHORISED: true }
+};
+
+// Cancelled is not the same as unposted, and only one of them is worth reporting.
+// A voided invoice is a decision somebody already made; a draft is money sitting in
+// a queue. Tallying the two together would bury the actionable number under history.
+const CANCELLED_STATUS = { VOIDED: true, DELETED: true };
+
+let _lastUnposted = { count: 0, total: 0 };
+
+/** What the last fetch skipped as unapproved, for the Health panel. */
+function lastUnpostedSummary() { return _lastUnposted; }
+
+/** True when a Xero document's status means it has reached the general ledger. */
+function isPosted_(collectionKey, status) {
+  const allowed = POSTED_STATUS[collectionKey];
+  // A collection with no status policy declared passes through rather than being
+  // dropped. A new fetcher that silently returns nothing is a much worse failure
+  // than one that counts too much, and it is far harder to notice.
+  if (!allowed) return true;
+  return allowed[String(status == null ? '' : status).toUpperCase()] === true;
+}
+
+/** True when the document was cancelled, as opposed to merely not approved yet. */
+function isCancelled_(status) {
+  return CANCELLED_STATUS[String(status == null ? '' : status).toUpperCase()] === true;
+}
+
 /** Paginate a Xero endpoint and flatten line items via `mapper`. */
 function paginate_(path, collectionKey, mapper, modifiedAfter) {
   const out = [];
@@ -223,7 +273,20 @@ function paginate_(path, collectionKey, mapper, modifiedAfter) {
     const data = xeroGet_(path, params);
     const rows = data[collectionKey] || [];
     if (!rows.length) break;
-    rows.forEach(r => mapper(r, out));
+    // Status is filtered here, not in each fetcher, for the same reason the
+    // balance-sheet exclusion sits in fetchXeroActuals: one place to state the rule,
+    // and the next endpoint somebody adds inherits it instead of forgetting it.
+    rows.forEach(r => {
+      if (!isPosted_(collectionKey, r.Status)) {
+        if (!isCancelled_(r.Status)) {
+          _lastUnposted.count++;
+          // SubTotal, because the app's line amounts are LineAmount and so tax-exclusive.
+          _lastUnposted.total += Math.abs(Number(r.SubTotal == null ? r.Total : r.SubTotal) || 0);
+        }
+        return;
+      }
+      mapper(r, out);
+    });
     if (rows.length < 100) break; // Xero pages at 100
     page++;
   }
@@ -252,7 +315,6 @@ function fetchBankTransactionLines_(modifiedAfter) {
 
 function fetchInvoiceLines_(modifiedAfter) {
   return paginate_('/Invoices', 'Invoices', (inv, out) => {
-    if (inv.Status === 'DELETED' || inv.Status === 'VOIDED') return;
     const date = new Date(inv.DateString || parseXeroDate_(inv.Date));
     const kind = inv.Type === 'ACCREC' ? 'income' : 'expense';
     (inv.LineItems || []).forEach(li => out.push(normaliseLine_(li, date, kind)));
