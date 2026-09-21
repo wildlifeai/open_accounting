@@ -1,0 +1,53 @@
+/**
+ * scan_commit_range.js
+ * Scans the messages of every commit a branch adds, not just the tip.
+ *
+ * The commit-msg hook catches a message as it is written, but only on a machine with
+ * hooks enabled. This is the backstop: it runs in CI over the whole range a pull request
+ * proposes, so a figure written on a laptop with --no-verify still fails before merge,
+ * while it is still cheap to fix. Once merged, removing it means rewriting shared history.
+ */
+'use strict';
+const { execSync } = require('child_process');
+const { scanSensitive, formatSensitive } = require('./sensitive');
+
+const base = (process.argv[2] || '').trim();
+// A first push has no meaningful base; fall back to the default branch, then to the last
+// commit, so the check degrades to "scan something" rather than silently passing.
+const ZERO = '0000000000000000000000000000000000000000';
+let range;
+if (base && base !== ZERO) range = base + '..HEAD';
+else {
+  try { execSync('git rev-parse --verify origin/dev', { stdio: 'ignore' }); range = 'origin/dev..HEAD'; }
+  catch (e) { range = 'HEAD~1..HEAD'; }
+}
+
+let log;
+try {
+  log = execSync('git log --format=%H%x00%B%x00 ' + range, { encoding: 'utf8' });
+} catch (e) {
+  console.log('scan_commit_range: could not read ' + range + ', nothing to scan');
+  process.exit(0);
+}
+
+const findings = [];
+log.split('\x00\n').forEach(chunk => {
+  const i = chunk.indexOf('\x00');
+  if (i === -1) return;
+  const sha = chunk.slice(0, i).trim().slice(0, 7);
+  const body = chunk.slice(i + 1);
+  if (!sha) return;
+  findings.push(...scanSensitive(body, 'commit ' + sha));
+});
+
+if (!findings.length) {
+  console.log('no content found in commit messages across ' + range);
+  process.exit(0);
+}
+
+console.error('\nCommit messages in ' + range + ' contain what looks like content:');
+console.error(formatSensitive(findings));
+console.error('Reword the offending commits before merging. Scope any rewrite to this');
+console.error('branch only (origin/dev..HEAD): rewriting commits already merged elsewhere');
+console.error('destroys the shared ancestry and every file then conflicts.\n');
+process.exit(1);

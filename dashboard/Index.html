@@ -36,6 +36,7 @@
       <button class="tab active" data-view="overview">Overview</button>
       <button class="tab" data-view="tracking">Quarterly tracking</button>
       <button class="tab" data-view="planner">Project planner</button>
+      <button class="tab" data-view="plan">Five-year plan</button>
       <!-- The count badge is not decoration. Health used to sit at the foot of the
            Overview where it was unavoidable; behind a tab, nothing would tell you there
            were fourteen errors unless the tab says so. -->
@@ -106,6 +107,33 @@
       </div>
     </div>
 
+    <div id="view-plan" class="hidden">
+      <div class="overview-section">
+        <h2>Five-year plan</h2>
+        <div class="coverage">
+          <span id="plan-scope"></span>
+        </div>
+        <div class="bd-controls">
+          <span class="bd-label">project:</span>
+          <select id="plan-project"><option value="*">All projects</option></select>
+          <span class="bd-label">show:</span>
+          <label><input type="checkbox" id="plan-empty"> financial years with no cost</label>
+        </div>
+        <div class="table-wrap">
+          <table class="plan-table">
+            <thead id="plan-head"></thead>
+            <tbody id="plan-body"></tbody>
+            <tfoot id="plan-foot"></tfoot>
+          </table>
+        </div>
+        <div class="legend">
+          <span class="muted">One row per funding source, milestone and financial year.
+            Cost is budgeted spend; Secured is income from a grant already won; Proposed is
+            income from an application still out. Comments come from the source's Forecast tab.</span>
+        </div>
+      </div>
+    </div>
+
     <div id="view-health" class="hidden">
       <div class="overview-section">
         <h2>System health</h2>
@@ -156,9 +184,44 @@
         <a id="planner-project-link" href="#" target="_blank" class="hidden planner-link">📁 Gdrive folder</a>
         <span id="planner-status" class="track-status"></span>
       </div>
+
+      <!-- The same controls as the Overview, so the two views answer the same question
+           at different grains: the Overview by financial year, this one by month. -->
+      <div class="bd-controls-wrap planner-controls">
+        <div class="bd-controls">
+          <span class="bd-label">group by:</span>
+          <label><input type="checkbox" class="pl-dim" value="fundingSource"> Funding source</label>
+          <label><input type="checkbox" class="pl-dim" value="status"> Status</label>
+        </div>
+        <div class="bd-controls">
+          <span class="bd-label">show:</span>
+          <label><input type="checkbox" class="pl-status" value="secured" checked> Secured (confirmed)</label>
+          <label><input type="checkbox" class="pl-status" value="proposed" checked> Proposed</label>
+        </div>
+        <div class="bd-controls">
+          <span class="bd-label">columns:</span>
+          <label><input type="checkbox" class="pl-col" value="cost"> Cost</label>
+          <label><input type="checkbox" class="pl-col" value="income"> Income</label>
+          <label><input type="checkbox" class="pl-col" value="pl"> Profit &amp; loss</label>
+        </div>
+        <div class="bd-controls">
+          <span class="bd-label">filter:</span>
+          <details class="bd-dd">
+            <summary id="pl-sources-sum">Funding sources</summary>
+            <div class="bd-dd-panel">
+              <div class="bd-dd-actions"><a data-target="pl-sources" data-act="all">all</a>
+                <a data-target="pl-sources" data-act="none">none</a></div>
+              <div class="bd-dd-list" id="pl-sources"></div>
+            </div>
+          </details>
+        </div>
+      </div>
+
       <div class="planner-legend">
         <span><i class="sw ok"></i> Secured (confirmed)</span>
         <span><i class="sw warn"></i> Proposed</span>
+        <span class="muted">Bars show when work is scheduled, month by month. Optional
+          columns total the whole bar: Profit &amp; loss is income minus cost.</span>
       </div>
       <div id="planner-grid" class="planner-grid"></div>
     </div>

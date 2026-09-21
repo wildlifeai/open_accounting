@@ -44,6 +44,8 @@
     buildFySelector(s);
     buildFilters();
     renderBreakdown();
+    buildPlanProjects(s);
+    renderPlan();
 
     renderHealth(s.health || []);
   }
@@ -103,6 +105,116 @@
     el.innerHTML = html;
   }
 
+  // ---- Five-year plan ------------------------------------------------------
+  // The question a project lead actually asks: what am I delivering, when, what does it
+  // cost, and how much of it is paid for. One row per funding source, milestone and
+  // financial year, because a milestone spanning two years is two different answers.
+  //
+  // Secured and Proposed stay in separate columns rather than being summed. Blending
+  // committed money with an application still out produces a number nobody can act on.
+
+  var PLAN_YEARS = 5;
+
+  function planFyList(snap) {
+    var years = [];
+    (snap.quarters || []).forEach(function (q) {
+      var fy = fyOf(q);
+      if (years.indexOf(fy) === -1) years.push(fy);
+    });
+    years.sort();
+    // Five years from the current one. Anything earlier is history, not a plan.
+    var current = fyOf(snap.currentQuarter || '');
+    var from = years.indexOf(current);
+    if (from === -1) from = 0;
+    return { shown: years.slice(from, from + PLAN_YEARS), all: years };
+  }
+
+  function renderPlan() {
+    if (!snapshot) return;
+    var sel = document.getElementById('plan-project');
+    var project = sel ? sel.value : '*';
+    var showEmpty = document.getElementById('plan-empty');
+    showEmpty = showEmpty ? showEmpty.checked : false;
+
+    var fys = planFyList(snapshot);
+    var inWindow = {};
+    fys.shown.forEach(function (y) { inWindow[y] = true; });
+
+    var rows = [];
+    (snapshot.breakdownRows || []).forEach(function (r) {
+      if (project !== '*' && r.project !== project) return;
+      fys.shown.forEach(function (fy) {
+        var cost = sumFy(r.budgetByQ, fy);
+        var secured = sumFy(r.securedByQ, fy);
+        var proposed = sumFy(r.proposedByQ, fy);
+        if (!showEmpty && !cost && !secured && !proposed) return;
+        rows.push({ source: r.fundingSource, milestone: r.milestone, fy: fy,
+          cost: cost, secured: secured, proposed: proposed,
+          comment: r.comment || '', project: r.project });
+      });
+    });
+
+    // Source, then milestone, then year: the order a lead reads a grant in.
+    rows.sort(function (a, b) {
+      return a.source.localeCompare(b.source) || a.milestone.localeCompare(b.milestone) ||
+             a.fy.localeCompare(b.fy);
+    });
+
+    document.getElementById('plan-head').innerHTML =
+      '<tr><th>Funding source</th><th>Milestone</th><th>Financial year</th>' +
+      '<th class="num">Cost</th><th class="num">Secured</th><th class="num">Proposed</th>' +
+      '<th>Comments</th></tr>';
+
+    var totC = 0, totS = 0, totP = 0, prevSource = null, prevMile = null;
+    document.getElementById('plan-body').innerHTML = rows.map(function (r) {
+      totC += r.cost; totS += r.secured; totP += r.proposed;
+      // Repeating the source and milestone on every year makes the table unreadable, so
+      // they print once per group and the eye follows the year column.
+      var newSource = r.source !== prevSource;
+      var newMile = newSource || r.milestone !== prevMile;
+      prevSource = r.source; prevMile = r.milestone;
+      var gap = r.cost - r.secured;
+      return '<tr' + (newSource ? ' class="plan-group"' : '') + '>' +
+        '<td>' + (newSource ? esc(r.source) : '') + '</td>' +
+        '<td>' + (newMile ? esc(r.milestone) : '') + '</td>' +
+        '<td>' + esc(r.fy) + '</td>' +
+        '<td class="num">' + money0(r.cost) + '</td>' +
+        '<td class="num">' + (r.secured ? money0(r.secured) : '') + '</td>' +
+        '<td class="num plan-proposed">' + (r.proposed ? money0(r.proposed) : '') + '</td>' +
+        '<td class="plan-cmt">' + (newMile && r.comment ? esc(r.comment) : '') +
+          (gap > 0 && !r.proposed
+            ? '<span class="plan-gap">' + money0(gap) + ' unfunded</span>' : '') +
+        '</td></tr>';
+    }).join('');
+
+    document.getElementById('plan-foot').innerHTML =
+      '<tr><td colspan="3">Total</td>' +
+      '<td class="num">' + money0(totC) + '</td>' +
+      '<td class="num">' + money0(totS) + '</td>' +
+      '<td class="num plan-proposed">' + money0(totP) + '</td>' +
+      '<td>' + (totC - totS > 0
+        ? '<span class="plan-gap">' + money0(totC - totS) + ' not yet secured</span>' : '') +
+      '</td></tr>';
+
+    var outside = fys.all.filter(function (y) { return !inWindow[y]; });
+    document.getElementById('plan-scope').innerHTML =
+      rows.length + ' row(s) across <b>' + (fys.shown.join(', ') || 'no years') + '</b>' +
+      (outside.length
+        ? ' · <span class="muted">' + outside.length + ' other financial year(s) hold data ' +
+          'outside this window: ' + esc(outside.join(', ')) + '</span>'
+        : '');
+  }
+
+  function buildPlanProjects(snap) {
+    var sel = document.getElementById('plan-project');
+    if (!sel) return;
+    var keep = sel.value;
+    var names = distinct(snap.breakdownRows || [], 'project');
+    sel.innerHTML = '<option value="*">All projects</option>' +
+      names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+    if (keep && (keep === '*' || names.indexOf(keep) !== -1)) sel.value = keep;
+  }
+
   var DIM_LABEL = { project: 'Project', fundingSource: 'Funding source', status: 'Status', milestone: 'Milestone' };
 
   function selectedDims() {
@@ -140,9 +252,18 @@
         (checked ? ' checked' : '') + '> ' + esc(v) + '</label>';
     }).join('');
     Array.prototype.slice.call(box.querySelectorAll('input')).forEach(function (i) {
-      i.addEventListener('change', function () { updateFilterSummary(id); renderBreakdown(); });
+      i.addEventListener('change', function () { updateFilterSummary(id); rerenderFor(id); });
     });
     updateFilterSummary(id);
+  }
+
+  // Filter lists are shared markup, so which view a change re-renders depends on the
+  // list's id rather than being hardcoded. Without this the planner's source filter would
+  // silently re-render the Overview instead.
+  function rerenderFor(id) {
+    if (id === 'pl-sources') renderPlanner();
+    else if (id === 'track-sources') loadTrackingSelected();
+    else renderBreakdown();
   }
 
   function updateFilterSummary(id) {
@@ -330,6 +451,12 @@
   Array.prototype.slice.call(document.querySelectorAll('.bd-dim, .bd-status, #bd-fy'))
     .forEach(function (c) { c.addEventListener('change', renderBreakdown); });
 
+  Array.prototype.slice.call(document.querySelectorAll('#plan-project, #plan-empty'))
+    .forEach(function (c) { c.addEventListener('change', renderPlan); });
+
+  Array.prototype.slice.call(document.querySelectorAll('.pl-dim, .pl-status, .pl-col'))
+    .forEach(function (c) { c.addEventListener('change', function () { renderPlanner(); }); });
+
   Array.prototype.slice.call(document.querySelectorAll('.bd-dd-actions a')).forEach(function (a) {
     a.addEventListener('click', function (e) {
       e.preventDefault();
@@ -341,7 +468,7 @@
         loadTrackingSelected();
       } else {
         updateFilterSummary(id);
-        renderBreakdown();
+        rerenderFor(id);
       }
     });
   });
@@ -493,6 +620,8 @@
     // Health needs no lazy load: the findings arrive with the snapshot and renderHealth
     // has already written them.
     document.getElementById('view-health').classList.toggle('hidden', view !== 'health');
+    // No lazy load: the plan is derived from breakdownRows, already in the snapshot.
+    document.getElementById('view-plan').classList.toggle('hidden', view !== 'plan');
     if (view === 'tracking' && !tracksLoaded) { tracksLoaded = true; loadSources(); }
     if (view === 'planner' && !plannerLoaded) { plannerLoaded = true; loadPlannerProjects(); }
   }
@@ -781,7 +910,10 @@
   function loadPlannerTimeline(projectName) {
     updatePlannerProjectLink(projectName);
     document.getElementById('planner-status').textContent = 'loading…';
-    google.script.run.withSuccessHandler(renderPlanner)
+    google.script.run.withSuccessHandler(function (milestones) {
+        buildPlannerSources(milestones);
+        renderPlanner(milestones);
+      })
       .withFailureHandler(function (e) {
         document.getElementById('planner-status').textContent = 'error: ' + e.message;
       }).apiGetTimeline(projectName);
@@ -807,112 +939,177 @@
     return MONTHS[parseInt(p[1], 10) - 1] + ' ' + p[0].slice(-2);
   }
 
+  // Held so the controls can re-render without another server round trip: the timeline
+  // for one project is a single fetch, and filtering it is arithmetic over what came back.
+  var plannerData = null;
+
+  function plSelected(cls) {
+    return Array.prototype.slice.call(document.querySelectorAll('.' + cls + ':checked'))
+      .map(function (c) { return c.value; });
+  }
+
+  /** Funding-source filter for the planner, built from whatever the timeline returned. */
+  function buildPlannerSources(milestones) {
+    var seen = {};
+    (milestones || []).forEach(function (m) {
+      (m.segments || []).forEach(function (seg) { seen[seg.source] = true; });
+    });
+    fillFilter('pl-sources', Object.keys(seen).sort());
+  }
+
   function renderPlanner(milestones) {
+    if (milestones) plannerData = milestones;
+    milestones = plannerData;
+    var grid = document.getElementById('planner-grid');
+    var status = document.getElementById('planner-status');
+
     if (!milestones || !milestones.length) {
-      document.getElementById('planner-grid').innerHTML =
-        '<div style="padding:24px;color:var(--muted)">No milestones found for this project.</div>';
-      document.getElementById('planner-status').textContent = '';
+      grid.innerHTML = '<div style="padding:24px;color:var(--muted)">' +
+        'No milestones found for this project.</div>';
+      status.textContent = '';
       return;
     }
+
+    var statuses = plSelected('pl-status');
+    var dims = plSelected('pl-dim');
+    var cols = plSelected('pl-col');
+    var sources = selectedValues('pl-sources');
 
     var hStart = milestones[0].horizonStart;
     var hEnd = milestones[0].horizonEnd;
     var months = monthRange(hStart, hEnd);
-    var todayKey = new Date().getFullYear() + '-' + ('0' + (new Date().getMonth() + 1)).slice(-2);
+    var todayKey = new Date().getFullYear() + '-' +
+      ('0' + (new Date().getMonth() + 1)).slice(-2);
 
-    // Header row: month columns
-    var head = '<thead><tr><th>Milestone</th>' + months.map(function (mk) {
-      var cls = mk === todayKey ? ' today-col' : '';
-      return '<th class="' + cls.trim() + '">' + fmtMonthShort(mk) + '</th>';
-    }).join('') + '</tr></thead>';
+    // One row per milestone, or per milestone and group when grouping is on. A milestone
+    // funded by two sources becomes two rows under "group by: Funding source", which is
+    // the point: you can see which grant pays for which stretch of the work.
+    var rows = [];
+    milestones.forEach(function (m) {
+      var segs = (m.segments || []).filter(function (seg) {
+        if (statuses.indexOf(seg.status) === -1) return false;
+        if (sources.length && sources.indexOf(seg.source) === -1) return false;
+        return true;
+      });
+      if (!segs.length) return;
+      if (!dims.length) {
+        rows.push({ milestone: m.milestone, group: '', segments: segs });
+        return;
+      }
+      var groups = {};
+      segs.forEach(function (seg) {
+        var key = dims.map(function (d) {
+          return d === 'fundingSource' ? seg.source : statusLabel(seg.status);
+        }).join(' › ');
+        (groups[key] = groups[key] || []).push(seg);
+      });
+      Object.keys(groups).sort().forEach(function (k) {
+        rows.push({ milestone: m.milestone, group: k, segments: groups[k] });
+      });
+    });
 
-    // Body: one row per milestone
-    var body = '<tbody>' + milestones.map(function (m) {
-      var sub = money0(m.totalBudget) + ' budget · ' + money0(m.totalActual) + ' actual';
-      var labelTd = '<td class="gantt-label">' + esc(m.milestone) +
-        '<span class="gantt-sub">' + sub + '</span></td>';
+    if (!rows.length) {
+      grid.innerHTML = '<div style="padding:24px;color:var(--muted)">' +
+        'Nothing matches the current filters.</div>';
+      status.textContent = '0 of ' + milestones.length + ' milestones shown';
+      return;
+    }
 
-      // Build a map: monthKey -> { source, status } for this milestone.
-      var coverage = {}; // monthKey -> { source, status }
-      m.segments.forEach(function (seg) {
+    var COL_LABEL = { cost: 'Cost', income: 'Income', pl: 'Profit &amp; loss' };
+    var head = '<thead><tr><th>Milestone</th>' +
+      cols.map(function (c) {
+        return '<th class="num gantt-fig">' + COL_LABEL[c] + '</th>';
+      }).join('') +
+      months.map(function (mk) {
+        return '<th class="' + (mk === todayKey ? 'today-col' : '') + '">' +
+          fmtMonthShort(mk) + '</th>';
+      }).join('') + '</tr></thead>';
+
+    var totals = { cost: 0, income: 0 };
+    var body = '<tbody>' + rows.map(function (row) {
+      var cost = 0, income = 0;
+      row.segments.forEach(function (seg) {
+        cost += seg.cost || 0;
+        income += seg.income || 0;
+      });
+      totals.cost += cost;
+      totals.income += income;
+
+      var labelTd = '<td class="gantt-label">' + esc(row.milestone) +
+        (row.group ? '<span class="gantt-sub">' + esc(row.group) + '</span>' : '') + '</td>';
+
+      var figTds = cols.map(function (c) {
+        var v = c === 'cost' ? cost : (c === 'income' ? income : income - cost);
+        var cls = 'num gantt-fig' + (c === 'pl' ? (v < 0 ? ' neg' : ' pos') : '');
+        return '<td class="' + cls + '">' + money0(v) + '</td>';
+      }).join('');
+
+      // monthKey -> the segment covering it. A later segment wins, matching how the grid
+      // reads: the most recently declared funding for that month.
+      var coverage = {};
+      row.segments.forEach(function (seg) {
         if (!seg.start || !seg.end) return;
-        var segMonths = monthRange(seg.start, seg.end);
-        segMonths.forEach(function (mk) {
-          // Only fill within the horizon
+        monthRange(seg.start, seg.end).forEach(function (mk) {
           if (mk >= hStart && mk <= hEnd) {
-            coverage[mk] = { source: seg.source, status: seg.status, cost: seg.monthlyCost[mk] || 0 };
+            coverage[mk] = { source: seg.source, status: seg.status,
+              cost: (seg.monthlyCost || {})[mk] || 0,
+              income: (seg.monthlyIncome || {})[mk] || 0 };
           }
         });
       });
 
-      // Determine if this milestone has any coverage at all (to show unplanned gaps).
-      var lastCoveredMonth = null;
-      var firstCoveredMonth = null;
-      months.forEach(function (mk) {
-        if (coverage[mk]) {
-          if (!firstCoveredMonth) firstCoveredMonth = mk;
-          lastCoveredMonth = mk;
-        }
-      });
-
-      // Render cells. Build runs of consecutive months with same source for merged segments.
       var cells = '';
       var i = 0;
       while (i < months.length) {
         var mk = months[i];
         var cov = coverage[mk];
-        var isTodayCol = mk === todayKey;
-
-        if (cov) {
-          // Find how many consecutive months have the same source
-          var runStart = i;
-          var runSource = cov.source;
-          var runStatus = cov.status;
-          var runCost = cov.cost;
-          while (i + 1 < months.length && coverage[months[i + 1]] &&
-                 coverage[months[i + 1]].source === runSource) {
-            i++;
-            runCost += coverage[months[i]].cost || 0;
-          }
-          var span = i - runStart + 1;
-          var cls = runStatus === 'secured' ? 'seg-secured' : 'seg-proposed';
-          var label = span >= 3 ? runSource : '';
-          var tip = runSource + ' (' + runStatus + ') · ' + money0(runCost);
-
-          // For multi-cell spans, use colspan
-          var todayCls = '';
-          for (var ci = runStart; ci <= i; ci++) {
-            if (months[ci] === todayKey) todayCls = ' today-col';
-          }
-          cells += '<td class="gantt-cell' + todayCls + '" colspan="' + span + '">' +
-            '<div class="gantt-seg ' + cls + '" style="left:2px;right:2px">' +
-            label + '<span class="seg-tip">' + tip + '</span></div></td>';
+        if (!cov) {
+          cells += '<td class="gantt-cell' + (mk === todayKey ? ' today-col' : '') + '"></td>';
           i++;
-        } else {
-          // Empty month (before first coverage, or gaps between segments)
-          cells += '<td class="gantt-cell' + (isTodayCol ? ' today-col' : '') + '"></td>';
-          i++;
+          continue;
         }
+        // Merge consecutive months funded by the same source into a single bar.
+        var runStart = i;
+        var runSource = cov.source;
+        var runStatus = cov.status;
+        var runCost = cov.cost;
+        var runIncome = cov.income;
+        while (i + 1 < months.length && coverage[months[i + 1]] &&
+               coverage[months[i + 1]].source === runSource) {
+          i++;
+          runCost += coverage[months[i]].cost || 0;
+          runIncome += coverage[months[i]].income || 0;
+        }
+        var span = i - runStart + 1;
+        var todayCls = '';
+        for (var ci = runStart; ci <= i; ci++) {
+          if (months[ci] === todayKey) todayCls = ' today-col';
+        }
+        var tip = runSource + ' (' + runStatus + ') · cost ' + money0(runCost) +
+          ' · income ' + money0(runIncome);
+        cells += '<td class="gantt-cell' + todayCls + '" colspan="' + span + '">' +
+          '<div class="gantt-seg ' +
+          (runStatus === 'secured' ? 'seg-secured' : 'seg-proposed') +
+          '" style="left:2px;right:2px">' + (span >= 3 ? esc(runSource) : '') +
+          '<span class="seg-tip">' + esc(tip) + '</span></div></td>';
+        i++;
       }
-
-      return '<tr>' + labelTd + cells + '</tr>';
+      return '<tr>' + labelTd + figTds + cells + '</tr>';
     }).join('') + '</tbody>';
 
-    // Summary footer
-    var totBudget = 0, totActual = 0;
-    milestones.forEach(function (m) {
-      totBudget += m.totalBudget;
-      totActual += m.totalActual;
-    });
-    var foot = '<tfoot><tr><td colspan="' + (months.length + 1) + '">' +
-      milestones.length + ' milestones · Total budget: ' + money0(totBudget) +
-      ' · Total actual: ' + money0(totActual) + '</td></tr></tfoot>';
+    var foot = '';
+    if (cols.length) {
+      foot = '<tfoot><tr><td>Total</td>' + cols.map(function (c) {
+        var v = c === 'cost' ? totals.cost
+              : (c === 'income' ? totals.income : totals.income - totals.cost);
+        var cls = 'num gantt-fig' + (c === 'pl' ? (v < 0 ? ' neg' : ' pos') : '');
+        return '<td class="' + cls + '">' + money0(v) + '</td>';
+      }).join('') + '<td colspan="' + months.length + '"></td></tr></tfoot>';
+    }
 
-    document.getElementById('planner-grid').innerHTML =
-      '<table class="gantt">' + head + body + foot + '</table>';
-    document.getElementById('planner-status').textContent =
-      milestones.length + ' milestones · horizon ' +
-      fmtMonthShort(hStart) + ' – ' + fmtMonthShort(hEnd);
+    grid.innerHTML = '<table class="gantt">' + head + body + foot + '</table>';
+    status.textContent = rows.length + ' row(s) · ' + fmtMonthShort(hStart) +
+      ' – ' + fmtMonthShort(hEnd);
   }
 
 </script>

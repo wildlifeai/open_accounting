@@ -110,8 +110,11 @@ const HEALTH_CATALOGUE = {
     action: 'One cost is billed to two funders. Item codes are {SOURCE}_{NNN} for a reason.' },
   E4: { severity: 'warning', category: 'Reconciliation',
     title: 'Same description budgeted in two sources over the same dates',
-    action: 'Double-funding signal, e.g. one FTE in two grants. If deliberate, put both ' +
-      'sheets in one Exclusivity group so the cost is counted once.' },
+    action: 'Double-funding signal, e.g. one FTE in two grants. If the two are competing ' +
+      'applications for the same work, put both sheets in one Exclusivity group so the ' +
+      'cost counts once. If it is genuinely different work that happens to share a ' +
+      'description, reword one: an Exclusivity group would zero one side\'s cost and ' +
+      'understate the budget.' },
   G1: { severity: 'warning', category: 'Funding',
     title: 'Secured funding exceeds the budgeted cost',
     action: 'Either two applications for the same work both landed, in which case ' +
@@ -340,7 +343,7 @@ function buildHealth(budgets, actualLines, ctx) {
     (actualLines || []).forEach(l => {
       if (l.kind !== 'expense') return;
       const fs = clean_(l.fundingSource || '');
-      if (!fs || startsWith_(fs, CONFIG.ARCHIVE_PREFIX)) return;
+      if (!fs || isArchivedSource_(fs)) return;
       if (!byName[fs]) {
         orphan[fs] = (orphan[fs] || 0) + (Number(l.amount) || 0);
         return;

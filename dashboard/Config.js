@@ -62,7 +62,11 @@ const CONFIG = {
 
   // ---- Health-check tuning ------------------------------------------------
   // Keys a sheet must carry. C1 names any that are missing.
-  REQUIRED_META: ['funding source', 'project', 'funder', 'status',
+  // `status` is deliberately NOT required: the secured/ or proposed/ folder the sheet
+  // sits in IS the status, and the code trusts the folder over the field. Requiring a
+  // second copy only created something that could disagree, which is what C2 reports.
+  // A sheet may still carry Status, and C2 still checks it when present.
+  REQUIRED_META: ['funding source', 'project', 'funder',
                   'funding start', 'funding end', 'owner'],
   // C4: a sheet nobody has looked at in this long is probably no longer true.
   STALE_REVIEW_DAYS: 90,

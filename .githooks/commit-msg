@@ -1,0 +1,11 @@
+#!/bin/sh
+# Scan the commit message for content that belongs in wildlife-ai-management, not here.
+#
+# This exists because tools/check_docs.js reads files, so it never sees commit messages.
+# That gap let a real salary figure into two pushed commits, and then into a third: the
+# very commit that removed it from the files quoted it again while explaining the rule.
+# Messages are the easiest place to leak and the hardest place to clean up afterwards,
+# because fixing one means rewriting history.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+node tools/commit_msg_check.js "$1" || exit 1

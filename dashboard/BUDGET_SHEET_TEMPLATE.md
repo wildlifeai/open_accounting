@@ -72,7 +72,7 @@ amounts, rates, funder terms or invoice identifiers into it.**
 | `Funding source` | yes | Must equal the file name **and** the Xero *Funding source* tracking value. The cockpit joins budgets to actuals on this string. |
 | `Project` | yes | Default project for lines with a blank `Project` cell. Must be a Xero *Projects* tracking value. |
 | `Funder` | yes | The organisation. Free text; for reporting and for spotting two applications to the same funder. |
-| `Status` | yes | `secured` \| `proposed` \| `archived`. Must agree with the folder the sheet sits in — disagreement is a health-check failure, not a preference. |
+| `Status` | no | Optional, and better left out. The `secured/` or `proposed/` folder the sheet sits in **is** the status, and the cockpit trusts the folder over this field. A second copy can only agree, which adds nothing, or disagree, which is C2. Keep it and it must match the folder. |
 | `Funding start` / `Funding end` | yes | The grant period. `Funding end` is what lets the cockpit flag actuals still landing against a finished grant. |
 | `Contribution policy` | yes | How much of this source's income funds `General`. One of `none`, `percent_of_income:<n>`, `per_line`. See below. |
 | `Amount requested` | yes | GST-exclusive total sought. |

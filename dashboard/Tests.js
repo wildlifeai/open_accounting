@@ -416,6 +416,41 @@ function runTests() {
     return z['26/27 Q1'] === 0 && m['26/27 Q1'] === 100;
   })());
 
+  // Five-year plan rows. The plan sums per-quarter buckets by financial year, so a
+  // milestone spanning two years must split, not double.
+  var planKey = 'General||XXX_27_PLAN||Delivery';
+  var planEntry = { budget: 0, income: 0, status: 'secured', budgetFY: 0, incomeFY: 0,
+    budgetByQ: {}, incomeByQ: {}, weightedByQ: {}, comment: 'phased over two years',
+    start: null, end: null };
+  var planLine = { description: 'Delivery lead', milestone: 'Delivery',
+    item: 'XXX_27_PLAN_001 - Delivery', project: 'General',
+    start: d(2026, 1, 1), end: d(2026, 12, 31), cost: 12000, income: 12000, contribution: 0 };
+  addInto_(planEntry.budgetByQ, bucketToQuarters(distributeByMonth_([planLine], 'cost')));
+  addInto_(planEntry.incomeByQ, bucketToQuarters(distributeByMonth_([planLine], 'income')));
+  planEntry.budget = 12000; planEntry.income = 12000;
+  var planRows = buildBreakdownRows_({ 'General||XXX_27_PLAN||Delivery': planEntry },
+    {}, {}, {}, { XXX_27_PLAN: 'secured' });
+  var pr = planRows[0];
+
+  check('a secured source fills securedByQ and leaves proposedByQ empty',
+    Object.keys(pr.securedByQ).length > 0 && Object.keys(pr.proposedByQ).length === 0);
+  check('the Forecast comment reaches the plan row', pr.comment === 'phased over two years');
+  check('cost splits across the two financial years it spans',
+    sumFyQ(pr.budgetByQ, '25/26') > 0 && sumFyQ(pr.budgetByQ, '26/27') > 0);
+  check('and the two years sum back to the line, not double it',
+    Math.abs(sumFyQ(pr.budgetByQ, '25/26') + sumFyQ(pr.budgetByQ, '26/27') - 12000) < 1);
+
+  // A proposed source must populate the other column, so the plan never blends committed
+  // money with an application still out.
+  var propEntry = JSON.parse(JSON.stringify(planEntry));
+  propEntry.status = 'proposed';
+  propEntry.budgetByQ = planEntry.budgetByQ; propEntry.incomeByQ = planEntry.incomeByQ;
+  var propRow = buildBreakdownRows_({ 'General||XXX_27_ASK||Delivery': propEntry },
+    {}, {}, {}, { XXX_27_ASK: 'proposed' })[0];
+  check('a proposed source fills proposedByQ and leaves securedByQ empty',
+    Object.keys(propRow.proposedByQ).length > 0 &&
+    Object.keys(propRow.securedByQ).length === 0);
+
   // Project-lead scoped access. filterSnapshotForProjects_ is pure precisely so this can
   // run without a second Google account signed in.
   var snap = {
@@ -495,6 +530,108 @@ function runTests() {
   var admin = filterSnapshotForProjects_(JSON.parse(JSON.stringify(snap)), ['*']);
   check('admin: sees everything', admin._accessLevel === 'admin' &&
     admin.health.length === 5 && admin.projects.length === 2);
+
+  // ---- funded runway -------------------------------------------------------
+  // The invariant that matters is ordering: secured must run out no later than weighted,
+  // and weighted no later than all-proposed. If that ever inverts, the chart is telling a
+  // board that winning more money shortened the runway.
+  var rwNow = new Date(2026, 5, 15); // 2026-06
+  function mSrc(name, status, meta, lines) {
+    return { name: name, status: status, metadata: meta || {}, lines: lines };
+  }
+  function mLine(y, m, cost, income) {
+    return { start: new Date(y, m - 1, 1), end: new Date(y, m, 0),
+      cost: cost, income: income, milestone: 'M', project: 'P' };
+  }
+
+  var rwBudgets = [
+    mSrc('A', 'secured', {}, [
+      mLine(2026, 6, 0, 10000),
+      mLine(2026, 6, 4000, 0), mLine(2026, 7, 4000, 0), mLine(2026, 8, 4000, 0),
+      mLine(2026, 9, 4000, 0), mLine(2026, 10, 4000, 0)
+    ]),
+    mSrc('B', 'proposed', { probability: 50 }, [mLine(2026, 8, 0, 8000)])
+  ];
+  var rw = buildRunway_(rwBudgets, [], rwNow, {});
+
+  check('runway: secured crosses first', rw.crossover.secured === '2026-08');
+  check('runway: weighted crosses later', rw.crossover.weighted === '2026-09');
+  check('runway: all-proposed crosses last', rw.crossover.proposed === '2026-10');
+  check('runway: months counted from the current month',
+    rw.monthsOfRunway.secured === 2 && rw.monthsOfRunway.weighted === 3 &&
+    rw.monthsOfRunway.proposed === 4);
+  check('runway: ordering holds, secured <= weighted <= proposed',
+    rw.monthsOfRunway.secured <= rw.monthsOfRunway.weighted &&
+    rw.monthsOfRunway.weighted <= rw.monthsOfRunway.proposed);
+  check('runway: opens at zero when there is no history', rw.openingNet === 0);
+  check('runway: with no actuals every row is forecast',
+    rw.months.length === 5 && rw.months.every(function (r) { return !r.actual; }));
+
+  // A proposed source with no Probability is unknown, not zero: it must lift the
+  // all-proposed ceiling while leaving the weighted line exactly where secured is.
+  var rwNoProb = buildRunway_([
+    mSrc('A', 'secured', {}, [mLine(2026, 6, 4000, 0), mLine(2026, 7, 4000, 0)]),
+    mSrc('B', 'proposed', {}, [mLine(2026, 6, 0, 9000)])
+  ], [], rwNow, {});
+  check('runway: no Probability leaves weighted level with secured',
+    rwNoProb.crossover.weighted === rwNoProb.crossover.secured &&
+    rwNoProb.crossover.weighted === '2026-06');
+  check('runway: no Probability still lifts the all-proposed ceiling',
+    rwNoProb.crossover.proposed === null);
+
+  // Actuals behind, budget ahead: months before this one collapse into openingNet.
+  var rwActuals = buildRunway_(rwBudgets, [
+    { date: new Date(2026, 4, 10), amount: 3000, kind: 'expense',
+      project: 'P', fundingSource: 'A', item: '' },
+    { date: new Date(2026, 4, 12), amount: 5000, kind: 'income',
+      project: 'P', fundingSource: 'A', item: '' }
+  ], rwNow, {});
+  check('runway: openingNet is income minus spend before this month',
+    rwActuals.openingNet === 2000);
+  check('runway: past months are flagged actual',
+    rwActuals.months[0].month === '2026-05' && rwActuals.months[0].actual === true);
+  check('runway: a positive opening pushes the crossover out',
+    rwActuals.crossover.secured === '2026-09');
+
+  // An archived source must not reach runway, or it would disagree with the org cards.
+  var rwArch = buildRunway_(rwBudgets, [
+    { date: new Date(2026, 4, 10), amount: 9999, kind: 'expense',
+      project: CONFIG.ARCHIVE_PREFIX + 'Old', fundingSource: 'A', item: '' }
+  ], rwNow, {});
+  check('runway: archived project actuals are excluded', rwArch.openingNet === 0);
+
+  check('runway: months counted across a year boundary',
+    monthsUntil_('2026-11', '2027-02') === 3);
+  check('runway: no crossover reports null, not zero',
+    monthsUntil_('2026-06', null) === null);
+
+  // ---- archiving actually archives ----------------------------------------
+  // Archiving happens in Drive; Xero keeps the original tracking name forever. Matching
+  // only on the prefix meant an archived sheet vanished from the dashboard while its
+  // spend stayed in the organisation totals with no budget beside it.
+  setArchivedSourceNames_({ 'WW_25_OLD': true });
+  check('archived: prefixed Xero tag still matches',
+    isArchivedSource_(CONFIG.ARCHIVE_PREFIX + 'WW_25_OLD') === true);
+  check('archived: bare Xero tag matches the name archived in Drive',
+    isArchivedSource_('WW_25_OLD') === true);
+  check('archived: a live source is untouched', isArchivedSource_('WW_25_TOI') === false);
+  check('archived: an empty tag is not archived, it is unassigned',
+    isArchivedSource_('') === false && isArchivedSource_(null) === false);
+
+  var rwArchName = buildRunway_([
+    mSrc('A', 'secured', {}, [mLine(2026, 6, 4000, 0)])
+  ], [
+    { date: new Date(2026, 4, 10), amount: 7777, kind: 'expense',
+      project: 'P', fundingSource: 'WW_25_OLD', item: '' }
+  ], rwNow, {});
+  check('archived: spend on an archived source stays out of runway',
+    rwArchName.openingNet === 0);
+  setArchivedSourceNames_({}); // shared global: leave it as it was found
+
+  // The folder is the status. Requiring a second copy only created something that
+  // could contradict it.
+  check('status is not a required metadata key',
+    (CONFIG.REQUIRED_META || []).indexOf('status') === -1);
 
   Logger.log(results.join('\n'));
   return results;

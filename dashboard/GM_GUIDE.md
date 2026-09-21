@@ -17,13 +17,16 @@ A refresh takes about a minute, and a progress bar shows which phase it is in
 (`Reading WW_25_TOI (6 of 9)`, `Fetching Xero Invoices, page 2`). Most of that minute is
 Drive and Xero, not the dashboard.
 
-## Four tabs
+## Five tabs
 
 - **Overview** - the org-wide picture with a flexible breakdown (below).
 - **Quarterly tracking** - where you track spend against one funding source at a time. This
   replaces the old per-funding-source "Budget, Actual, Forecast Tracking" tab - see
   ["Tracking and forecasting"](#tracking-and-forecasting-quarterly) below.
 - **Project planner** - milestone segments on a timeline, coloured by funding status.
+- **Five-year plan** - the tabular view for project leads: one row per funding source,
+  milestone and financial year, showing what it costs, what is secured and what is still
+  an application. Answers "what am I delivering, when, and is it paid for".
 - **Health** - sheet, Xero-coding and system problems found on the last refresh. The tab
   carries a count badge: red for errors, amber for warnings, nothing when clean. **If that
   badge is showing, a number somewhere on the dashboard is wrong.**

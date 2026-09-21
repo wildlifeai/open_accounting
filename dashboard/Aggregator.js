@@ -15,9 +15,37 @@
  * category, so actual numbers are exact, not approximated.
  */
 
+/**
+ * Funding sources archived in Drive, keyed by the name Xero still knows them by.
+ *
+ * Set once per refresh by buildSnapshot. Apps Script gives the whole project one global
+ * scope, and this mirrors lastExclusionSummary() in XeroClient: a value established during
+ * the crawl that half a dozen later passes need, without threading an extra argument
+ * through six signatures that have nothing else to do with archiving.
+ */
+var ARCHIVED_SOURCE_NAMES = {};
+
+function setArchivedSourceNames_(names) { ARCHIVED_SOURCE_NAMES = names || {}; }
+
+/**
+ * One definition of "this funding source is archived", because there were nine.
+ *
+ * Matches either the Xero tag carrying the prefix, which happens only if somebody renamed
+ * the tracking option too, or the bare name appearing in the archived set built from Drive,
+ * which is what actually happens.
+ */
+function isArchivedSource_(name) {
+  const n = String(name == null ? '' : name);
+  if (!n) return false;
+  if (startsWith_(n, CONFIG.ARCHIVE_PREFIX)) return true;
+  return ARCHIVED_SOURCE_NAMES[n] === true;
+}
+
 function buildSnapshot() {
   const now = new Date();
   const fy = fyBounds_(now);
+  // Before any actual is bucketed: every pass below asks isArchivedSource_ about a tag.
+  setArchivedSourceNames_(readArchivedSourceNames());
 
   // The folder walk is not free: measured at ~13s of a ~60s refresh, because DriveApp
   // folder and file iterators are slow even though nothing is opened yet.
@@ -116,7 +144,7 @@ function buildSnapshot() {
       if (!budgetByKey[bkey]) {
         budgetByKey[bkey] = { budget: 0, income: 0, status: src.status,
           budgetFY: 0, incomeFY: 0, budgetByQ: {}, incomeByQ: {}, weightedByQ: {},
-          start: null, end: null };
+          comment: '', start: null, end: null };
       }
       const entry = budgetByKey[bkey];
       // costFactor is 0 when a competing application in the same exclusivity group carries
@@ -133,6 +161,9 @@ function buildSnapshot() {
       if (probability !== null) {
         addInto_(entry.weightedByQ,
                  scaleMap_(bucketToQuarters(lineIncByMonth), probability));
+      }
+      if (!entry.comment && code && src.forecast && src.forecast.comments) {
+        entry.comment = src.forecast.comments[code] || '';
       }
       if (l.start && (!entry.start || l.start < new Date(entry.start)))
         entry.start = isoOrNull_(l.start);
@@ -157,7 +188,7 @@ function buildSnapshot() {
     // so keeping its actuals guaranteed a mismatch: spend with no budget beside it,
     // inflating org actuals and making the whole organisation look overspent.
     // buildTimeline_ already filtered both, so the two views disagreed.
-    if (startsWith_(l.fundingSource || '', CONFIG.ARCHIVE_PREFIX)) return;
+    if (isArchivedSource_(l.fundingSource)) return;
     const p = project_(l.project);
     p.actualExpense += l.amount;
     
@@ -203,6 +234,9 @@ function buildSnapshot() {
 
   // Project planner timeline: milestone segments color-coded by funding status.
   const timeline = buildTimeline_(budgets, actualLines, itemToMilestone, fy, now);
+
+  // Funded runway: cumulative income against cumulative spend, month by month.
+  const runway = buildRunway_(budgets, actualLines, now, exclusivityReps);
 
   // Per-project rollups (feed the summary cards / org totals).
   const rows = Object.keys(projects).map(name => {
@@ -265,6 +299,7 @@ function buildSnapshot() {
     breakdownRows: breakdownRows,
     tracking: tracking,
     timeline: timeline,
+    runway: runway,
     health: health,
     dataFlags: dataFlags.concat(healthToFlags(health))
   };
@@ -289,7 +324,8 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, actualByKe
     const source = parts[1];
     const milestone = parts[2] || '(unassigned)';
     const b = budgetByKey[key] || { budget: 0, income: 0, budgetFY: 0, incomeFY: 0,
-      budgetByQ: {}, incomeByQ: {}, weightedByQ: {}, start: null, end: null };
+      budgetByQ: {}, incomeByQ: {}, weightedByQ: {}, comment: '',
+      start: null, end: null };
     const status = (b.status || sourceStatus[source] || 'unknown');
     return {
       project: project,
@@ -306,10 +342,15 @@ function buildBreakdownRows_(budgetByKey, actualByKey, actualByKeyFY, actualByKe
       // for secured sources and is empty otherwise, matching the scalar above.
       budgetByQ: roundMapValues_(b.budgetByQ || {}),
       securedByQ: status === 'secured' ? roundMapValues_(b.incomeByQ || {}) : {},
+      // Income from a source that is still an application. Kept separate from secured so
+      // the five-year plan can show committed and hoped-for money in different columns
+      // rather than blending them into one number nobody can act on.
+      proposedByQ: status === 'proposed' ? roundMapValues_(b.incomeByQ || {}) : {},
       actualByQ: roundMapValues_(actualByKeyQ[key] || {}),
       // Secured in full plus proposed at its probability. What we expect to have, as
       // opposed to what is committed.
       weightedByQ: roundMapValues_(b.weightedByQ || {}),
+      comment: b.comment || '',
       start: b.start || null,
       end: b.end || null
     };
@@ -400,14 +441,20 @@ function buildTimeline_(budgets, actualLines, itemToMilestone, fy, now) {
       const pmKey = pName + '||' + mile;
       if (!byProjMile[pmKey]) byProjMile[pmKey] = { project: pName, milestone: mile, segments: [], actualExpense: 0 };
 
+      // Income as well as cost, so the planner can offer Cost / Income / Profit and loss
+      // per milestone. Profit and loss is derived in the client rather than stored: it is
+      // income minus cost, and storing a third series invites the three to disagree.
       const monthlyCost = distributeByMonth_([l], 'cost');
+      const monthlyIncome = distributeByMonth_([l], 'income');
       byProjMile[pmKey].segments.push({
         source: src.name,
         status: src.status,
         start: l.start ? DateMath.monthKey(l.start) : null,
         end: l.end ? DateMath.monthKey(l.end) : null,
         cost: round_(l.cost),
-        monthlyCost: roundMapValues_(monthlyCost)
+        income: round_(l.income),
+        monthlyCost: roundMapValues_(monthlyCost),
+        monthlyIncome: roundMapValues_(monthlyIncome)
       });
     });
   });
@@ -466,7 +513,7 @@ function buildTimeline_(budgets, actualLines, itemToMilestone, fy, now) {
   // Compute actual net per source for contribution entries
   var sourceActualNet = {};
   actualLines.forEach(function (l) {
-    if (!l.fundingSource || startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)) return;
+    if (!l.fundingSource || isArchivedSource_(l.fundingSource)) return;
     if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
     var pmKey = CONFIG.GENERAL_PROJECT + '||' + l.fundingSource + ' (contribution)';
     if (!byProjMile[pmKey]) return;
@@ -500,9 +547,34 @@ function buildTimeline_(budgets, actualLines, itemToMilestone, fy, now) {
   }).sort((a, b) => a.project.localeCompare(b.project) || a.milestone.localeCompare(b.milestone));
 }
 
+/**
+ * Round every value, and preserve the total while doing it.
+ *
+ * Rounding each entry independently drifts: a $12,000 line day-weighted across four
+ * quarters gives four values near x.5, which round to $12,001 (INVENTED-OK). Consumers
+ * maps then shows a total a few dollars off the budget it came from, and nobody can
+ * explain the difference.
+ *
+ * Largest remainder: round everything, then push the shortfall onto the entries whose
+ * fractions sat closest to the boundary, so the map always sums to its unrounded total.
+ */
 function roundMapValues_(map) {
-  var out = {};
-  Object.keys(map).forEach(k => (out[k] = Math.round(map[k])));
+  const keys = Object.keys(map || {});
+  const out = {};
+  let sum = 0;
+  keys.forEach(k => { out[k] = Math.round(map[k]); sum += out[k]; });
+
+  let diff = Math.round(keys.reduce((a, k) => a + map[k], 0)) - sum;
+  if (diff !== 0 && keys.length) {
+    const frac = k => map[k] - Math.floor(map[k]);
+    // Adding? Take the entries rounded down hardest. Removing? Those rounded up hardest.
+    const order = keys.slice().sort((a, b) => diff > 0 ? frac(b) - frac(a) : frac(a) - frac(b));
+    for (let i = 0; diff !== 0 && i < order.length; i++) {
+      const step = diff > 0 ? 1 : -1;
+      out[order[i]] += step;
+      diff -= step;
+    }
+  }
   return out;
 }
 
@@ -511,6 +583,134 @@ function roundMapValues_(map) {
  * bucketed by milestone (item code) and quarter. Returns an array ready for the
  * quarterly tracking screen; the live forecast layer is merged in WebApp/UI.
  */
+/**
+ * Funded runway: the month cumulative income stops covering cumulative spend.
+ *
+ * This is NOT cash runway. There is no bank balance anywhere in this system and the Xero
+ * scopes cannot reach one, so it answers "when does the plan go underwater on money we have
+ * actually won", not "when does the account empty". Anyone quoting it to a board must say
+ * which one they mean.
+ *
+ * Months before the current one use Xero actuals; the current month and every month after
+ * use the budget. The current month is deliberately budget rather than actual-so-far,
+ * because a part-elapsed month of actuals understates spend and would push the crossover
+ * later, which is the flattering direction.
+ *
+ * Everything before the current month collapses into `openingNet`, and the crossover is
+ * only looked for from the current month on. Opening the walk at zero on the earliest
+ * budgeted month would report a crossover in month one for any grant-funded organisation,
+ * since spend always precedes the first tranche. That number would be arithmetically
+ * correct and completely useless.
+ *
+ * Three income lines, because the distance between them is the fundraising question stated
+ * in months rather than dollars:
+ *   secured   secured sources only, the floor
+ *   weighted  secured, plus each proposed source's income at its stated probability
+ *   proposed  secured, plus every proposed source in full, the ceiling
+ * All three share the same past, because a proposed grant has paid nothing yet, so they can
+ * only diverge ahead of today.
+ *
+ * A single burn-rate division was rejected deliberately: grant income arrives in tranches,
+ * and dividing by an average burn rate reports a crossover no month actually experiences.
+ */
+function buildRunway_(budgets, actualLines, now, exclusivityReps) {
+  const nowKey = DateMath.monthKey(now);
+
+  const budgetCost = {};   // monthKey -> budgeted cost, exclusivity-adjusted
+  const incSecured = {};
+  const incWeighted = {};
+  const incProposed = {};
+
+  budgets.forEach(src => {
+    const group = clean_((src.metadata || {})[CONFIG.META.exclusivityGroup] || '');
+    const carriesCost = !group || (exclusivityReps || {})[group] === src.name;
+    const probability = sourceProbability_(src.status, src.metadata);
+
+    const cost = distributeByMonth_(src.lines, 'cost');
+    const income = distributeByMonth_(src.lines, 'income');
+
+    addInto_(budgetCost, scaleMap_(cost, carriesCost ? 1 : 0));
+    addInto_(incProposed, income);
+    if (src.status === 'secured') {
+      addInto_(incSecured, income);
+      addInto_(incWeighted, income);
+    } else if (probability !== null) {
+      // A proposed source with no Probability contributes nothing here rather than being
+      // guessed at, exactly as in the org totals. G2 asks for the number.
+      addInto_(incWeighted, scaleMap_(income, probability));
+    }
+  });
+
+  const actualCost = {};
+  const actualIncome = {};
+  actualLines.forEach(l => {
+    // Same exclusions as the org totals, or runway would disagree with the cards above it.
+    if (!l.project || startsWith_(l.project, CONFIG.ARCHIVE_PREFIX)) return;
+    if (isArchivedSource_(l.fundingSource)) return;
+    const key = DateMath.monthKey(new Date(l.date));
+    const target = l.kind === 'expense' ? actualCost : actualIncome;
+    target[key] = (target[key] || 0) + l.amount;
+  });
+
+  const seen = {};
+  [budgetCost, incSecured, incWeighted, incProposed, actualCost, actualIncome]
+    .forEach(m => Object.keys(m).forEach(k => (seen[k] = true)));
+  const months = Object.keys(seen).sort();
+
+  const empty = { months: [], openingNet: 0, crossover: { secured: null, weighted: null,
+    proposed: null }, monthsOfRunway: { secured: null, weighted: null, proposed: null } };
+  if (!months.length) return empty;
+
+  let spend = 0, secured = 0, weighted = 0, proposed = 0;
+  let openingNet = null;
+  const rows = [];
+  const crossover = { secured: null, weighted: null, proposed: null };
+
+  months.forEach(key => {
+    const past = key < nowKey;
+    if (!past && openingNet === null) openingNet = round_(secured - spend);
+
+    spend += past ? (actualCost[key] || 0) : (budgetCost[key] || 0);
+    if (past) {
+      const inc = actualIncome[key] || 0;
+      secured += inc; weighted += inc; proposed += inc;
+    } else {
+      secured += incSecured[key] || 0;
+      weighted += incWeighted[key] || 0;
+      proposed += incProposed[key] || 0;
+    }
+
+    if (!past) {
+      if (crossover.secured === null && secured - spend < 0) crossover.secured = key;
+      if (crossover.weighted === null && weighted - spend < 0) crossover.weighted = key;
+      if (crossover.proposed === null && proposed - spend < 0) crossover.proposed = key;
+    }
+
+    rows.push({ month: key, actual: past, spend: round_(spend), secured: round_(secured),
+      weighted: round_(weighted), proposed: round_(proposed) });
+  });
+
+  // Every month is in the past: the budget has run out, not the money. Say so with nulls
+  // rather than reporting a crossover that the data cannot support.
+  if (openingNet === null) openingNet = round_(secured - spend);
+
+  return { months: rows, openingNet: openingNet, crossover: crossover,
+    monthsOfRunway: {
+      secured: monthsUntil_(nowKey, crossover.secured),
+      weighted: monthsUntil_(nowKey, crossover.weighted),
+      proposed: monthsUntil_(nowKey, crossover.proposed)
+    } };
+}
+
+/** Whole months from one monthKey to another, or null when there is no crossover. */
+function monthsUntil_(fromKey, toKey) {
+  if (!toKey) return null;
+  const a = fromKey.split('-');
+  const b = toKey.split('-');
+  return (parseInt(b[0], 10) - parseInt(a[0], 10)) * 12 +
+         (parseInt(b[1], 10) - parseInt(a[1], 10));
+}
+
 function buildTracking_(budgets, actualLines) {
   // Index Xero actuals by source||itemCode -> { quarter: amount }, split by
   // expense (cost) vs income. Also remember a display name per item code.
@@ -518,7 +718,7 @@ function buildTracking_(budgets, actualLines) {
   const incomeActuals = {};
   const actualNames = {}; // source||code -> Xero item name
   actualLines.forEach(l => {
-    if (!l.fundingSource || startsWith_(l.fundingSource, CONFIG.ARCHIVE_PREFIX)) return;
+    if (!l.fundingSource || isArchivedSource_(l.fundingSource)) return;
     const q = quarterOfMonthKey_(DateMath.monthKey(new Date(l.date)));
     const code = itemCode_(l.item);
     const key = l.fundingSource + '||' + code;

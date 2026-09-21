@@ -58,6 +58,53 @@ function startsWithArchive_(name) {
   return name.indexOf(CONFIG.ARCHIVE_PREFIX) === 0;
 }
 
+/**
+ * Names of archived funding sources, with ARCHIVE_PREFIX stripped off.
+ *
+ * Archiving is an act in Drive: the sheet moves to `archived/` and is usually renamed
+ * with the prefix. Neither of those touches Xero, where the tracking option keeps the
+ * name it was created with, forever. So filtering actuals on the tag starting with the
+ * prefix only ever caught sources somebody had also renamed inside Xero, which in
+ * practice is none of them. The archived sheet vanished from the dashboard while its
+ * spend stayed in the organisation totals with no budget beside it, which is precisely
+ * the mismatch that filter was written to prevent.
+ *
+ * Returned by name so the caller can match on the Xero tag as it actually reads.
+ * Folder walk only, nothing is opened, so this costs about what counting costs.
+ */
+function readArchivedSourceNames() {
+  const root = DriveApp.getFolderById(CONFIG.BUDGETS_ROOT_FOLDER_ID);
+  const names = {};
+  const note = n => {
+    const bare = startsWithArchive_(n) ? n.slice(CONFIG.ARCHIVE_PREFIX.length) : n;
+    if (bare) names[bare] = true;
+  };
+
+  const projectFolders = root.getFolders();
+  while (projectFolders.hasNext()) {
+    const projectFolder = projectFolders.next();
+    if (startsWithArchive_(projectFolder.getName())) {
+      // A whole archived project: everything beneath it is archived with it.
+      [CONFIG.SECURED_FOLDER_NAME, CONFIG.PROPOSED_FOLDER_NAME,
+       CONFIG.ARCHIVED_FOLDER_NAME].forEach(sub => eachSheetName_(projectFolder, sub, note));
+      continue;
+    }
+    eachSheetName_(projectFolder, CONFIG.ARCHIVED_FOLDER_NAME, note);
+    // A prefixed file still sitting in secured/ or proposed/ is archived in intent, and
+    // the crawl already skips it, so its actuals must go the same way.
+    [CONFIG.SECURED_FOLDER_NAME, CONFIG.PROPOSED_FOLDER_NAME].forEach(sub =>
+      eachSheetName_(projectFolder, sub, n => { if (startsWithArchive_(n)) note(n); }));
+  }
+  return names;
+}
+
+function eachSheetName_(projectFolder, subName, fn) {
+  const subs = projectFolder.getFoldersByName(subName);
+  if (!subs.hasNext()) return;
+  const files = subs.next().getFilesByType(MimeType.GOOGLE_SHEETS);
+  while (files.hasNext()) fn(files.next().getName());
+}
+
 /** Folder walk only. Nothing here opens a spreadsheet, so it stays cheap. */
 function collectStatusFolder_(projectFolder, subName, status, out) {
   const subs = projectFolder.getFoldersByName(subName);

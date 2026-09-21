@@ -30,13 +30,17 @@ clasp list-scripts                  # standalone projects only; bound scripts do
 Two checks, both offline. Run them before every push:
 
 ```bash
-node dashboard/check_docs.js        # fails when the docs disagree with the code
+node tools/check_docs.js            # fails when the docs disagree with the code
+node tools/run_tests.js             # runs dashboard/Tests.js headlessly
 ```
 
-`dashboard/Tests.js` holds `runTests()`: 116 checks over the forecast maths, budget and
+Both live in `tools/`, not `dashboard/`, because `.claspignore` is a whitelist: any `.js`
+file under `dashboard/` is swept into the Apps Script project whether or not it belongs there.
+
+`dashboard/Tests.js` holds `runTests()`: 121 checks over the forecast maths, budget and
 forecast parsing, the health catalogue, scoped access, and the funding pipeline. It runs
-from the IDE with no Drive or Xero access. The Node harness that runs the same file
-headlessly lives outside the repo; `runTests()` is the canonical copy.
+from the IDE with no Drive or Xero access, and `tools/run_tests.js` runs the same file under
+Node. `runTests()` is the canonical copy.
 
 `check_docs.js` is the one that stops documentation rotting: it verifies health-check ids
 **and severities** match `HEALTH_CATALOGUE`, the file list is complete, GM_GUIDE's tab count
@@ -44,7 +48,42 @@ matches `Index.html`, every `Config.META` key is documented, no doc points at a 
 and nothing in the docs looks like a real figure, a personal email or a bank account. This is
 a public repository, so that last group matters.
 
-CI is GitGuardian secret scanning only. Neither check runs automatically yet.
+Both run in CI on every push and pull request, via `.github/workflows/checks.yml`, alongside
+GitGuardian secret scanning.
+
+## What belongs in this repository
+
+**This repository is public, and it holds structure, not content.** Schema, code, checks,
+and documentation about how the system works.
+
+The content lives elsewhere: **`wildlife-ai-management`** and the Budgets Drive hold actual
+budgets, funder terms, salary bands, and decisions about specific grants.
+
+The line, stated so a machine can check it:
+
+> A file here may **name** a funding source. It may never **state an amount**.
+
+Names like `WW_25_TOI` are unavoidable, because they are the Xero tracking values the code
+joins on, and funders announce their grants anyway. Amounts are the part that reveals what
+a person is paid and what a funder agreed. Every example figure in this repository is
+invented and round; if you need to write one, round it, or append `INVENTED-OK` to the line.
+
+That applies to **commit messages too**, which is the easiest place to leak and the most
+expensive to clean up: removing a figure from a merged commit means rewriting shared
+history. Three mechanisms enforce it, in increasing order of how hard they are to bypass:
+
+```bash
+git config core.hooksPath .githooks   # enable the hooks, once per clone
+```
+
+| | Runs | Catches |
+|---|---|---|
+| `.githooks/pre-commit` | before each commit | stale docs, content in files |
+| `.githooks/commit-msg` | as a message is written | content in that message |
+| `.github/workflows/checks.yml` | every push and PR | both, across the whole branch, and cannot be skipped with `--no-verify` |
+
+All three call the same scanner, [`tools/sensitive.js`](tools/sensitive.js), so there is one
+rule rather than three that drift.
 
 ## Non-negotiables
 
@@ -58,8 +97,9 @@ CI is GitGuardian secret scanning only. Neither check runs automatically yet.
 - **Verify AI review suggestions against the data before applying them.** A reviewer bot on PR #6
   asked for project abbreviations that matched neither the README nor the real Drive files;
   applying it would have decoupled generated budgets from live funding sources.
-- **There is no `.gitattributes`.** clasp writes LF, Windows checks out CRLF, so whole files
-  appear modified. Use `git diff --ignore-cr-at-eol` and never commit a line-endings-only diff.
+- **`.gitattributes` pins LF** (`* text=auto eol=lf`, added 2026-08-11). Before it, clasp wrote LF
+  while a Windows checkout was CRLF, so whole files appeared modified with no content change. Use
+  `git diff --ignore-cr-at-eol` and never commit a line-endings-only diff.
 - **Apps Script has one global scope per project.** Private helpers take a trailing underscore;
   only real entry points stay bare. SKILL.md §1, Global Scope Invariant.
 - **Money changes need a human.** Anything altering published actuals, budgets, or what a funder
@@ -73,7 +113,6 @@ CI is GitGuardian secret scanning only. Neither check runs automatically yet.
 | Deep guide | [`.agents/skills/SKILL.md`](.agents/skills/SKILL.md) |
 | Funding Cockpit dashboard | [`dashboard/`](dashboard/) — `README.md`, `GM_GUIDE.md`, `BUDGET_PROCEDURES_ADDENDUM.md` |
 | `PROJECT_overview` sheet aggregator | [`project_reports/`](project_reports/) — predates the cockpit and overlaps requirement 10. Quarterly budget generation was retired 2026-08-11 |
-| Funding reports (Xero) | [`funding_reports/`](funding_reports/) — still contains a remote loader, see SKILL.md §5 |
 | Chart-of-accounts helpers | `general_valid_accounts.js`, `variance_funding_source.js` (root) |
 | Account-keyed budget/overhead logic | `create_xero_budget_project.js` (root) |
 | Budgets (the actual data) | Google Drive `Budgets` folder — id `10105co6S5qHFSVVg0pb0fkoPidN3ScJZ` |
