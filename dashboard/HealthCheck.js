@@ -141,7 +141,12 @@ const HEALTH_CATALOGUE = {
     action: 'Set them in Project Settings > Script Properties.' },
   F5: { severity: 'info', category: 'System',
     title: 'Refresh summary',
-    action: '' }
+    action: '' },
+  F6: { severity: 'info', category: 'System',
+    title: 'Unapproved Xero documents skipped',
+    action: 'Approve them in Xero to have them count. Drafts are not on the ledger, ' +
+            'so Xero\'s own reports ignore them too. A draft bill understates spend ' +
+            'and flatters runway; a draft invoice does the reverse.' }
 };
 
 const HEALTH_SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
@@ -149,7 +154,8 @@ const HEALTH_SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
 /**
  * @param {Array} budgets  from readAllBudgets()
  * @param {Array} actualLines  normalised Xero lines
- * @param {Object} ctx  { now, xeroConnected, exclusion: {count,total}, secretsMissing: [],
+ * @param {Object} ctx  { now, xeroConnected, exclusion: {count,total},
+ *                       unposted: {count,total}, secretsMissing: [],
  *                       exclusivity: {reps, suppressed} }
  * @return {Array} findings, most severe first, and by value at risk within severity
  */
@@ -276,11 +282,15 @@ function buildHealth(budgets, actualLines, ctx) {
         ' and is still in secured/' }));
     }
 
-    const policy = clean_(meta['contribution policy'] || '');
-    if (!policy) {
+    // The value is reported back exactly as typed, and matched after normalising.
+    // A check that accepts "none" and rejects "None" sends somebody hunting through a
+    // sheet that was already right, which is worse than no check at all.
+    const policyRaw = clean_(meta['contribution policy'] || '');
+    if (!policyRaw) {
       add('C6', withBase_(base, { detail: 'no "contribution policy"' }));
-    } else if (!(CONFIG.CONTRIBUTION_POLICIES || []).some(re => re.test(policy))) {
-      add('C6', withBase_(base, { detail: '"' + policy + '" is not one of none, ' +
+    } else if (!(CONFIG.CONTRIBUTION_POLICIES || [])
+        .some(re => re.test(normalisePolicy_(policyRaw)))) {
+      add('C6', withBase_(base, { detail: '"' + policyRaw + '" is not one of none, ' +
         'per_line, percent_of_income:<n>' }));
     }
 
@@ -487,6 +497,11 @@ function buildHealth(budgets, actualLines, ctx) {
     countLines_(budgets) + ' budget line(s) parsed, ' +
     (actualLines || []).length + ' actual line(s) after excluding ' + excl.count +
     ' on balance-sheet accounts (' + excl.total + ')' });
+  const unp = ctx.unposted || { count: 0, total: 0 };
+  if (unp.count) {
+    add('F6', { detail: unp.count + ' document(s) in draft or awaiting approval, ' +
+      'totalling ' + Math.round(unp.total), amount: Math.round(unp.total) });
+  }
 
   out.sort(function (a, b) {
     const s = HEALTH_SEVERITY_RANK[a.severity] - HEALTH_SEVERITY_RANK[b.severity];
@@ -503,6 +518,18 @@ function healthToFlags(health) {
     .map(f => (f.severity === 'error' ? '[error] ' : '[warning] ') +
       (f.fundingSource ? f.fundingSource + ': ' : '') + f.title +
       (f.detail ? ' - ' + f.detail : ''));
+}
+
+/**
+ * Fold the spellings a person actually types onto the three policy tokens.
+ * Every rule here maps a spelling onto the same meaning, never one meaning onto
+ * another: "40%" stays rejected, because it is a different statement from
+ * percent_of_income:40 and guessing which was meant is not the checker's job.
+ */
+function normalisePolicy_(value) {
+  return clean_(value).toLowerCase()
+    .replace(/[\s-]+/g, '_')  // "Per line" and "per-line" are both per_line
+    .replace(/_*:_*/g, ':');  // "percent of income: 40" is percent_of_income:40
 }
 
 function withBase_(base, fields) {
