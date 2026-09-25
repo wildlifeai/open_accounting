@@ -36,7 +36,17 @@ Drive and Xero, not the dashboard.
 1. **Summary cards** - organisation totals: forecast budget, secured funding, actual spent
    to date, and the headline **unsecured gap** (money still to be raised = proposed budget
    minus secured funding).
-2. **Breakdown** - a table you can slice with the `group by:` checkboxes at the top right.
+2. **Runway** - organisation-wide and outside every filter on the page. *Net position
+   today* is secured income received minus spend to date. The three tiles give the months
+   until cumulative spend overtakes cumulative income: on secured money only, on the
+   probability-weighted pipeline, and if every application lands, each naming the month
+   it goes short. "Beyond *month*" means no shortfall before the last budgeted month,
+   which is not the same as safe: the budgets may simply stop there. The chart is the
+   same walk month by month, Xero actuals to last month and the Budget tabs from this
+   month on; the vertical rule is today, shaded months are budget, and a hollow dot is
+   where a line goes below zero. This is **funded** runway, not cash; the cockpit reads
+   no bank balance.
+3. **Breakdown** - a table you can slice with the `group by:` checkboxes at the top right.
    Tick any combination of:
    - **Project** (e.g. Wildlife Watcher, Spyfish, General),
    - **Funding source** (e.g. WW_25_TOI), and

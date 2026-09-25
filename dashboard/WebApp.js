@@ -96,6 +96,10 @@ function filterSnapshotForProjects_(snap, allowedProjects) {
 
   const filteredSnap = JSON.parse(JSON.stringify(snap));
 
+  // Runway is the whole organisation's position, secured money against all spend. A
+  // project lead's own numbers are theirs to see; the organisation's balance is not.
+  delete filteredSnap.runway;
+
   if (filteredSnap.projects) {
     filteredSnap.projects = filteredSnap.projects.filter(r => allowedProjects.includes(r.project));
   }

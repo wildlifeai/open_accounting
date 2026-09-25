@@ -769,6 +769,17 @@ function runTests() {
   check('finding_ returns null for an id not in the catalogue',
     finding_('ZZ9', {}) === null);
 
+  // Runway is organisation-wide, so only full access receives it.
+  var rwSnap = { generatedAt: hoursAgo(1), runway: { months: [{ month: '2026-09' }] },
+    projects: [], fundingSources: [], breakdownRows: [], tracking: [], timeline: [],
+    health: [] };
+  check('runway: full access keeps it',
+    filterSnapshotForProjects_(rwSnap, ['*']).runway !== undefined);
+  check('runway: a project lead does not receive it',
+    filterSnapshotForProjects_(rwSnap, ['Spyfish Aotearoa']).runway === undefined);
+  check('runway: no access does not receive it',
+    filterSnapshotForProjects_(rwSnap, []).runway === undefined);
+
   Logger.log(results.join('\n'));
   return results;
 }
