@@ -31,6 +31,19 @@ function getCurrentUserEmail_() {
 function getFilteredSnapshot_() {
   const snap = getSnapshot();
   if (!snap) return null;
+  // Staleness and the trigger are judged now, not at the last refresh: see
+  // serveTimeHealth. readSnapshot_ parses the file afresh on every call, so this is a
+  // private object and adding to it leaks into nothing.
+  const late = serveTimeHealth({
+    now: new Date(),
+    generatedAt: snap.generatedAt,
+    triggerInstalled: refreshTriggerInstalled_(),
+    refreshHours: CONFIG.REFRESH_TRIGGER_HOURS
+  });
+  if (late.length) {
+    snap.health = late.concat(snap.health || []).sort(healthOrder_);
+    snap.dataFlags = healthToFlags(snap.health);
+  }
   const email = getCurrentUserEmail_();
   const out = filterSnapshotForProjects_(snap, getUserPermissions(email));
   if (out) out._userEmail = email;
@@ -42,7 +55,7 @@ function getFilteredSnapshot_() {
  * they are looking at are stale. Everything else that carries no project is org-wide:
  * D1 and D2 are organisation dollar totals, F5 counts every source in the org.
  */
-const SCOPED_VISIBLE_SYSTEM_CHECKS = { F1: true, F3: true };
+const SCOPED_VISIBLE_SYSTEM_CHECKS = { F1: true, F2: true, F3: true, F7: true };
 
 /**
  * Reduce a snapshot to the projects a user may see. Pure over its inputs, so the

@@ -137,6 +137,11 @@ duplication you *did* declare, via `Exclusivity group`.
 | F3 | error | Required Script Properties missing | Name which. |
 | F5 | info | Last refresh time, duration, sheets read, lines parsed | Trend tells you when the 6-minute limit is approaching. |
 | F6 | info | Xero documents skipped because they are still in draft or awaiting approval | Approve them in Xero to have them count. Drafts are not on the ledger, so Xero's own reports ignore them too. A draft bill understates spend and flatters runway; a draft invoice does the reverse. Voided and deleted documents are not counted here: they are decisions somebody already made, not a queue to clear. |
+| F2 | warning | Snapshot older than 2× the refresh interval | Press Refresh now, then look at Executions in the editor for why the trigger is failing. One missed run is a hiccup, two is a pattern. **Raised at serve time**, by `serveTimeHealth` in `getFilteredSnapshot_`, not by `buildHealth`: inside a refresh the snapshot is fresh by definition. The detail says how old the snapshot is and how often it is meant to refresh. |
+| F7 | error | No time-based trigger calls `refreshSnapshot` | Run `installRefreshTrigger` from the editor. Until then nothing refreshes and every number is whatever was last cached, however old that gets. Also serve time, and read live: a check made during a refresh would describe the trigger as it was then, and a dead trigger runs no refresh to notice itself. When the trigger list cannot be read at all, nothing is raised: a false alarm sends somebody to reinstall a trigger that is fine. |
+
+F2 and F7 are the only findings a project-scoped user sees besides F1 and F3, because each
+one means the numbers they are looking at are old.
 
 ## UI
 
@@ -196,7 +201,6 @@ Ids are reserved, so implementing one means moving its row up rather than renumb
 | ~~D7~~ | — | ~~Spend counted on an excluded balance-sheet account~~ | **Superseded.** `EXCLUDED_ACCOUNTS` was wired up on 2026-08-11, so this can no longer happen. The exclusion count and total are reported by **F5**. |
 | E5 | warning | Salary actuals attributed differently from budgeted salary lines | **Blocked, and worth unblocking.** The payroll-template drift detector. It needs budgets at account level to compare against, and budgets are now at milestone level by design, so there is nothing to compare. **D6** catches part of the same failure by a different route: spend still arriving after a grant has ended is usually a stale repeating journal. |
 | E6 | info | Residual hand-entered overhead lines alongside a derived `Contribution policy` | **Blocked.** Identifying an overhead line reliably needs the `*Account` column, which is retired. Matching on description text would be guesswork. |
-| F2 | warning | Snapshot older than 2× the refresh interval | **Wrong layer, not blocked.** Health is computed *during* a refresh, so the snapshot is always fresh at the moment this would run. It has to be evaluated when the page renders a cached snapshot, in `renderHealth`, not in `buildHealth`. |
 | F4 | warning | A Xero scope needed by a feature in use is absent | Not built. `accounting.transactions.read` covers everything currently fetched, so there is nothing to detect yet. Worth adding when a feature needs a scope beyond it. |
 
 `dashboard/check_docs.js` fails if any id above appears in `HEALTH_CATALOGUE`, or if any

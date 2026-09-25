@@ -146,7 +146,16 @@ const HEALTH_CATALOGUE = {
     title: 'Unapproved Xero documents skipped',
     action: 'Approve them in Xero to have them count. Drafts are not on the ledger, ' +
             'so Xero\'s own reports ignore them too. A draft bill understates spend ' +
-            'and flatters runway; a draft invoice does the reverse.' }
+            'and flatters runway; a draft invoice does the reverse.' },
+  // F2 and F7 are raised at serve time by serveTimeHealth, not by buildHealth.
+  F2: { severity: 'warning', category: 'System',
+    title: 'Snapshot is stale',
+    action: 'The refresh has missed at least two runs. Press Refresh now, then look at ' +
+            'Executions in the editor for why the trigger is failing.' },
+  F7: { severity: 'error', category: 'System',
+    title: 'No auto-refresh trigger installed',
+    action: 'Run installRefreshTrigger from the editor. Until then nothing refreshes, ' +
+            'and every number here is whatever was last cached, however old that gets.' }
 };
 
 const HEALTH_SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
@@ -167,19 +176,8 @@ function buildHealth(budgets, actualLines, ctx) {
   const now = ctx.now ? new Date(ctx.now) : null;
 
   function add(id, fields) {
-    const spec = HEALTH_CATALOGUE[id];
-    if (!spec) return; // never let an unknown id break the refresh
-    out.push({
-      id: id, severity: spec.severity, category: spec.category, title: spec.title,
-      action: spec.action,
-      detail: fields.detail || '',
-      fundingSource: fields.fundingSource || '',
-      project: fields.project || '',
-      owner: fields.owner || '',
-      row: fields.row || null,
-      amount: fields.amount || 0,
-      link: fields.link || ''
-    });
+    const f = finding_(id, fields);
+    if (f) out.push(f);
   }
 
   (budgets || []).forEach(b => {
@@ -503,12 +501,85 @@ function buildHealth(budgets, actualLines, ctx) {
       'totalling ' + Math.round(unp.total), amount: Math.round(unp.total) });
   }
 
-  out.sort(function (a, b) {
-    const s = HEALTH_SEVERITY_RANK[a.severity] - HEALTH_SEVERITY_RANK[b.severity];
-    if (s !== 0) return s;
-    return (b.amount || 0) - (a.amount || 0); // value at risk first within severity
-  });
+  out.sort(healthOrder_);
   return out;
+}
+
+/** One finding in the shape the panel renders, or null for an id not in the catalogue. */
+function finding_(id, fields) {
+  const spec = HEALTH_CATALOGUE[id];
+  if (!spec) return null; // never let an unknown id break a refresh or a page load
+  fields = fields || {};
+  return {
+    id: id, severity: spec.severity, category: spec.category, title: spec.title,
+    action: spec.action,
+    detail: fields.detail || '',
+    fundingSource: fields.fundingSource || '',
+    project: fields.project || '',
+    owner: fields.owner || '',
+    row: fields.row || null,
+    amount: fields.amount || 0,
+    link: fields.link || ''
+  };
+}
+
+/** Most severe first, then value at risk. One comparator so build and serve agree. */
+function healthOrder_(a, b) {
+  const s = HEALTH_SEVERITY_RANK[a.severity] - HEALTH_SEVERITY_RANK[b.severity];
+  if (s !== 0) return s;
+  return (b.amount || 0) - (a.amount || 0);
+}
+
+// ---- Serve-time findings ---------------------------------------------------
+// buildHealth runs inside a refresh, so at that moment the snapshot is fresh by
+// definition and a check on its age can only ever pass. A trigger check made there would
+// describe the trigger as it was at the last refresh, which is the one moment that tells
+// you least: if the trigger has died, there is no refresh to run the check. So these two
+// are evaluated when a cached snapshot is served, against the clock and the trigger list
+// as they are at that moment.
+//
+// The refresh trigger was missing for an unknown stretch before 2026-09-21 and nothing
+// on the dashboard said so. Every figure on screen was old and looked current.
+
+// One missed run is a hiccup, Apps Script time triggers do occasionally skip. Two is a
+// pattern.
+const STALE_AFTER_INTERVALS = 2;
+
+/**
+ * @param {Object} ctx { now: Date, generatedAt: string, triggerInstalled: boolean|null,
+ *                       refreshHours: number }
+ *   triggerInstalled null means "could not tell", which must not read as "missing": a
+ *   false alarm sends somebody to reinstall a trigger that is fine.
+ * @return {Array} findings, most severe first
+ */
+function serveTimeHealth(ctx) {
+  ctx = ctx || {};
+  const out = [];
+  const refreshHours = ctx.refreshHours || CONFIG.REFRESH_TRIGGER_HOURS;
+
+  if (ctx.triggerInstalled === false) {
+    out.push(finding_('F7', { detail: 'no time-based trigger calls refreshSnapshot' }));
+  }
+
+  const hours = ageHours_(ctx.generatedAt, ctx.now);
+  if (hours !== null && hours > STALE_AFTER_INTERVALS * refreshHours) {
+    out.push(finding_('F2', { detail: 'last refreshed ' + ageLabel_(hours) +
+      ' ago; the trigger is meant to run every ' + refreshHours + ' hour(s)' }));
+  }
+
+  return out.filter(Boolean).sort(healthOrder_);
+}
+
+/** Hours between generatedAt and now, or null when either cannot be read. */
+function ageHours_(generatedAt, now) {
+  const t = Date.parse(generatedAt);
+  if (isNaN(t) || !now || typeof now.getTime !== 'function') return null;
+  return (now.getTime() - t) / 3600000;
+}
+
+function ageLabel_(hours) {
+  if (hours < 48) return Math.round(hours) + ' hour(s)';
+  return Math.round(hours / 24) + ' day(s)';
 }
 
 /** Short strings for the legacy dataFlags list, errors and warnings only. */
