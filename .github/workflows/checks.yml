@@ -1,0 +1,35 @@
+# The version that cannot be bypassed.
+#
+# Both hooks in .githooks/ are opt-in per clone and skippable with --no-verify, which is
+# correct for local work but means neither is a guarantee. This runs on every push and
+# pull request, so a figure or a stale document cannot reach dev or main through a branch
+# that had hooks disabled.
+name: checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Needed so the commit-message scan can see every commit the branch adds,
+          # rather than just the tip.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Documentation agrees with the code
+        run: node tools/check_docs.js
+
+      - name: Apps Script tests
+        run: node tools/run_tests.js
+
+      - name: No content in commit messages
+        run: node tools/scan_commit_range.js "${{ github.event.pull_request.base.sha || github.event.before }}"

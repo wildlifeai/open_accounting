@@ -1,0 +1,73 @@
+/**
+ * ForecastStore.js
+ * Manages the central "Cockpit Settings" Google Sheet which contains the
+ * Permissions tab for role-based access control.
+ *
+ * Legacy forecast storage has been removed — forecasts are now read directly
+ * from each funding source's own Forecast tab (see BudgetReader.parseForecastTab_).
+ */
+
+// ---- Settings spreadsheet management ----
+
+/**
+ * Open the configured Settings spreadsheet, or auto-create one inside the Budgets
+ * root folder if none is configured/found, persisting its id for next time.
+ */
+function openOrCreateSettingsSpreadsheet_() {
+  var id = getSettingsSheetId();
+  if (id) {
+    try { return SpreadsheetApp.openById(id); }
+    catch (e) { /* id stale/inaccessible — fall through and recreate */ }
+  }
+  return createSettingsSpreadsheet_();
+}
+
+function createSettingsSpreadsheet_() {
+  var ss = SpreadsheetApp.create(CONFIG.SETTINGS.FILE_NAME);
+  // Move it from My Drive into the Budgets root folder.
+  try {
+    var folder = DriveApp.getFolderById(CONFIG.BUDGETS_ROOT_FOLDER_ID);
+    DriveApp.getFileById(ss.getId()).moveTo(folder);
+  } catch (e) {
+    Logger.log('Settings sheet created but could not move to Budgets folder: ' + e.message);
+  }
+  setSecret(CONFIG.SETTINGS.PROPERTY_KEY, ss.getId());
+  Logger.log('Created Settings sheet ' + ss.getId() + ' ("' + CONFIG.SETTINGS.FILE_NAME + '").');
+  return ss;
+}
+
+// ---- Permissions ----
+
+function getPermissionsSheet_() {
+  var ss = openOrCreateSettingsSpreadsheet_();
+  var sheet = ss.getSheetByName(CONFIG.PERMISSIONS.TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.PERMISSIONS.TAB);
+    sheet.appendRow(CONFIG.PERMISSIONS.HEADER);
+    sheet.setFrozenRows(1);
+
+    // Seed with the script owner as admin.
+    var email = Session.getEffectiveUser().getEmail() || 'admin@example.com';
+    sheet.appendRow([email, '*']);
+  }
+  return sheet;
+}
+
+/**
+ * Returns an array of allowed project names for the given email,
+ * or ['*'] if they have full access. If no access is defined, returns [].
+ */
+function getUserPermissions(email) {
+  if (!email) return [];
+  var sheet = getPermissionsSheet_();
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    var rowEmail = String(data[i][0]).trim().toLowerCase();
+    if (rowEmail === String(email).trim().toLowerCase()) {
+      var projectsStr = String(data[i][1]).trim();
+      if (projectsStr === '*') return ['*'];
+      return projectsStr.split(',').map(function(p) { return p.trim(); }).filter(function(p) { return p.length > 0; });
+    }
+  }
+  return []; // default to no access
+}

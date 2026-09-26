@@ -1,0 +1,20 @@
+# Every text file in this repository is LF, in the stored blob and in the working
+# tree on every machine. `eol=lf` intentionally overrides any local core.autocrlf.
+#
+# Why: clasp writes LF, a Windows checkout was CRLF, so `clasp pull` made whole
+# files look modified with no content change and real edits became invisible in
+# the diff. See .agents/skills/SKILL.md, Line Ending Invariant.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.zip  binary
+*.mp4  binary

@@ -1,0 +1,1382 @@
+<script>
+  var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function fmtMoney(n) {
+    return '$' + (Number(n) || 0).toLocaleString('en-NZ', { maximumFractionDigits: 0 });
+  }
+  function fmtMonthKey(key) {
+    if (!key) return '';
+    var p = key.split('-');
+    return MONTHS[parseInt(p[1], 10) - 1] + ' ' + p[0];
+  }
+  function ago(iso) {
+    var mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 60) return mins + 'm ago';
+    var h = Math.round(mins / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.round(h / 24) + 'd ago';
+  }
+  var COLOR = { ok: 'var(--green)', warn: 'var(--amber)', danger: 'var(--red)' };
+  var snapshot = null;
+
+  function render(s) {
+    snapshot = s;
+    var syncText = 'synced ' + ago(s.generatedAt);
+    if (s._userEmail) syncText += ' · ' + s._userEmail;
+    if (s._accessLevel && s._accessLevel !== 'admin') syncText += ' (' + s._accessLevel + ')';
+    document.getElementById('sync-label').textContent = syncText;
+
+    var warn = document.getElementById('xero-warning');
+    if (s.xeroConnected) { warn.classList.add('hidden'); }
+    else {
+      warn.classList.remove('hidden');
+      google.script.run.withSuccessHandler(function (st) {
+        if (st.authUrl) document.getElementById('xero-link').href = st.authUrl;
+      }).apiXeroStatus();
+    }
+
+    // Today sits in the header so every tab shows it, not only the Overview.
+    var todayEl = document.getElementById('today-label');
+    if (todayEl && s.coverage) todayEl.textContent = dayMonthYear(s.coverage.today);
+
+    // #totals and the coverage line are both written inside renderBreakdown(), so they
+    // always describe the same filtered, FY-scoped selection.
+    buildFySelector(s);
+    buildFilters();
+    renderBreakdown();
+    buildPlanProjects(s);
+    renderPlan();
+    // Not wired to the filter or FY controls: runway is organisation-wide and always
+    // runs from today, so it renders once per snapshot.
+    renderRunway(s.runway);
+
+    renderHealth(s.health || []);
+  }
+
+  // Health findings: what is wrong, where, and what to do about it. Sorted by
+  // severity then by value at risk, so a large misattribution outranks a missing
+  // description. See dashboard/HEALTH_CHECKS.md.
+  function renderHealth(health) {
+    var el = document.getElementById('flags');
+    var badge = document.getElementById('health-badge');
+
+    var counts = { error: 0, warning: 0, info: 0 };
+    health.forEach(function (f) { counts[f.severity] = (counts[f.severity] || 0) + 1; });
+
+    // Health lives behind a tab now, so the badge is what tells you to look. Errors
+    // outrank warnings; info is never badged because nothing is wrong yet.
+    if (badge) {
+      var n = counts.error || counts.warning;
+      badge.textContent = n ? String(n) : '';
+      badge.className = 'badge' + (n ? (counts.error ? ' badge-error' : ' badge-warning')
+                                     : ' hidden');
+    }
+
+    if (!health.length) {
+      el.innerHTML = '<div class="health-sum">Nothing to report. Every sheet parsed and ' +
+        'every actual line is tagged.</div>';
+      return;
+    }
+
+    var parts = [];
+    if (counts.error) parts.push('<b>' + counts.error + (counts.error === 1 ? ' error' : ' errors') + '</b>');
+    if (counts.warning) parts.push(counts.warning + (counts.warning === 1 ? ' warning' : ' warnings'));
+    if (counts.info) parts.push(counts.info + ' info');
+    var html = '<div class="health-sum">Health: ' + parts.join(' · ') + '</div>';
+
+    health.forEach(function (f) {
+      if (f.severity === 'info') return;
+      var where = [];
+      if (f.fundingSource) where.push(f.fundingSource);
+      if (f.row) where.push('row ' + f.row);
+      html += '<div class="health-row health-' + esc(f.severity) + '">' +
+        '<span class="health-title">' + esc(f.title) + '</span>' +
+        (where.length ? '<span class="health-where">' + esc(where.join(' · ')) + '</span>' : '') +
+        (f.amount ? '<span class="health-amt">' + fmtMoney(f.amount) + '</span>' : '') +
+        (f.detail ? '<div class="health-detail">' + esc(f.detail) + '</div>' : '') +
+        (f.action ? '<div class="health-action">' + esc(f.action) + '</div>' : '') +
+        (f.link ? '<div><a class="health-link" target="_blank" rel="noopener" href="' +
+          esc(f.link) + '">open sheet</a></div>' : '') +
+        '</div>';
+    });
+
+    health.forEach(function (f) {
+      if (f.severity === 'info' && f.detail) {
+        html += '<div class="health-info">' + esc(f.detail) + '</div>';
+      }
+    });
+    el.innerHTML = html;
+  }
+
+  // ---- Five-year plan ------------------------------------------------------
+  // The question a project lead actually asks: what am I delivering, when, what does it
+  // cost, and how much of it is paid for. One row per funding source, milestone and
+  // financial year, because a milestone spanning two years is two different answers.
+  //
+  // Secured and Proposed stay in separate columns rather than being summed. Blending
+  // committed money with an application still out produces a number nobody can act on.
+
+  var PLAN_YEARS = 5;
+
+  function planFyList(snap) {
+    var years = [];
+    (snap.quarters || []).forEach(function (q) {
+      var fy = fyOf(q);
+      if (years.indexOf(fy) === -1) years.push(fy);
+    });
+    years.sort();
+    // Five years from the current one. Anything earlier is history, not a plan.
+    var current = fyOf(snap.currentQuarter || '');
+    var from = years.indexOf(current);
+    if (from === -1) from = 0;
+    return { shown: years.slice(from, from + PLAN_YEARS), all: years };
+  }
+
+  function renderPlan() {
+    if (!snapshot) return;
+    var sel = document.getElementById('plan-project');
+    var project = sel ? sel.value : '*';
+    var showEmpty = document.getElementById('plan-empty');
+    showEmpty = showEmpty ? showEmpty.checked : false;
+
+    var fys = planFyList(snapshot);
+    var inWindow = {};
+    fys.shown.forEach(function (y) { inWindow[y] = true; });
+
+    var rows = [];
+    (snapshot.breakdownRows || []).forEach(function (r) {
+      if (project !== '*' && r.project !== project) return;
+      fys.shown.forEach(function (fy) {
+        var cost = sumFy(r.budgetByQ, fy);
+        var secured = sumFy(r.securedByQ, fy);
+        var proposed = sumFy(r.proposedByQ, fy);
+        if (!showEmpty && !cost && !secured && !proposed) return;
+        rows.push({ source: r.fundingSource, milestone: r.milestone, fy: fy,
+          cost: cost, secured: secured, proposed: proposed,
+          comment: r.comment || '', project: r.project });
+      });
+    });
+
+    // Source, then milestone, then year: the order a lead reads a grant in.
+    rows.sort(function (a, b) {
+      return a.source.localeCompare(b.source) || a.milestone.localeCompare(b.milestone) ||
+             a.fy.localeCompare(b.fy);
+    });
+
+    document.getElementById('plan-head').innerHTML =
+      '<tr><th>Funding source</th><th>Milestone</th><th>Financial year</th>' +
+      '<th class="num">Cost</th><th class="num">Secured</th><th class="num">Proposed</th>' +
+      '<th>Comments</th></tr>';
+
+    var totC = 0, totS = 0, totP = 0, prevSource = null, prevMile = null;
+    document.getElementById('plan-body').innerHTML = rows.map(function (r) {
+      totC += r.cost; totS += r.secured; totP += r.proposed;
+      // Repeating the source and milestone on every year makes the table unreadable, so
+      // they print once per group and the eye follows the year column.
+      var newSource = r.source !== prevSource;
+      var newMile = newSource || r.milestone !== prevMile;
+      prevSource = r.source; prevMile = r.milestone;
+      var gap = r.cost - r.secured;
+      return '<tr' + (newSource ? ' class="plan-group"' : '') + '>' +
+        '<td>' + (newSource ? esc(r.source) : '') + '</td>' +
+        '<td>' + (newMile ? esc(r.milestone) : '') + '</td>' +
+        '<td>' + esc(r.fy) + '</td>' +
+        '<td class="num">' + money0(r.cost) + '</td>' +
+        '<td class="num">' + (r.secured ? money0(r.secured) : '') + '</td>' +
+        '<td class="num plan-proposed">' + (r.proposed ? money0(r.proposed) : '') + '</td>' +
+        '<td class="plan-cmt">' + (newMile && r.comment ? esc(r.comment) : '') +
+          (gap > 0 && !r.proposed
+            ? '<span class="plan-gap">' + money0(gap) + ' unfunded</span>' : '') +
+        '</td></tr>';
+    }).join('');
+
+    document.getElementById('plan-foot').innerHTML =
+      '<tr><td colspan="3">Total</td>' +
+      '<td class="num">' + money0(totC) + '</td>' +
+      '<td class="num">' + money0(totS) + '</td>' +
+      '<td class="num plan-proposed">' + money0(totP) + '</td>' +
+      '<td>' + (totC - totS > 0
+        ? '<span class="plan-gap">' + money0(totC - totS) + ' not yet secured</span>' : '') +
+      '</td></tr>';
+
+    var outside = fys.all.filter(function (y) { return !inWindow[y]; });
+    document.getElementById('plan-scope').innerHTML =
+      rows.length + ' row(s) across <b>' + (fys.shown.join(', ') || 'no years') + '</b>' +
+      (outside.length
+        ? ' · <span class="muted">' + outside.length + ' other financial year(s) hold data ' +
+          'outside this window: ' + esc(outside.join(', ')) + '</span>'
+        : '');
+  }
+
+  function buildPlanProjects(snap) {
+    var sel = document.getElementById('plan-project');
+    if (!sel) return;
+    var keep = sel.value;
+    var names = distinct(snap.breakdownRows || [], 'project');
+    sel.innerHTML = '<option value="*">All projects</option>' +
+      names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+    if (keep && (keep === '*' || names.indexOf(keep) !== -1)) sel.value = keep;
+  }
+
+  var DIM_LABEL = { project: 'Project', fundingSource: 'Funding source', status: 'Status', milestone: 'Milestone' };
+
+  function selectedDims() {
+    return Array.prototype.slice.call(document.querySelectorAll('.bd-dim:checked'))
+      .map(function (c) { return c.value; });
+  }
+
+  function selectedStatuses() {
+    return Array.prototype.slice.call(document.querySelectorAll('.bd-status:checked'))
+      .map(function (c) { return c.value; });
+  }
+
+  function distinct(rows, field) {
+    var seen = {};
+    rows.forEach(function (r) { seen[r[field]] = true; });
+    return Object.keys(seen).sort();
+  }
+
+  // Populate the Project / Funding-source filter dropdowns from the data,
+  // preserving any selections the user already made.
+  function buildFilters() {
+    var rows = snapshot.breakdownRows || [];
+    fillFilter('filter-projects', distinct(rows, 'project'));
+    fillFilter('filter-sources', distinct(rows, 'fundingSource'));
+  }
+
+  function fillFilter(id, values) {
+    var box = document.getElementById(id);
+    var prev = {};
+    Array.prototype.slice.call(box.querySelectorAll('input'))
+      .forEach(function (i) { prev[i.value] = i.checked; });
+    box.innerHTML = values.map(function (v) {
+      var checked = (v in prev) ? prev[v] : true;
+      return '<label><input type="checkbox" value="' + esc(v) + '"' +
+        (checked ? ' checked' : '') + '> ' + esc(v) + '</label>';
+    }).join('');
+    Array.prototype.slice.call(box.querySelectorAll('input')).forEach(function (i) {
+      i.addEventListener('change', function () { updateFilterSummary(id); rerenderFor(id); });
+    });
+    updateFilterSummary(id);
+  }
+
+  // Filter lists are shared markup, so which view a change re-renders depends on the
+  // list's id rather than being hardcoded. Without this the planner's source filter would
+  // silently re-render the Overview instead.
+  function rerenderFor(id) {
+    if (id === 'pl-sources') renderPlanner();
+    else if (id === 'track-sources') loadTrackingSelected();
+    else renderBreakdown();
+  }
+
+  function updateFilterSummary(id) {
+    var box = document.getElementById(id);
+    var all = box.querySelectorAll('input');
+    var on = box.querySelectorAll('input:checked');
+    var sum = document.getElementById(id + '-sum');
+    var base = (id === 'filter-projects') ? 'Projects' : 'Funding sources';
+    sum.textContent = (on.length === all.length)
+      ? base + ' (all)' : base + ' (' + on.length + '/' + all.length + ')';
+  }
+
+  function selectedValues(id) {
+    return Array.prototype.slice.call(document.querySelectorAll('#' + id + ' input:checked'))
+      .map(function (c) { return c.value; });
+  }
+
+  // ---- Financial-year scope -----------------------------------------------
+  // Quarter labels are "26/27 Q2", so the FY is everything before the space. The client
+  // totals whichever quarters belong to the selected year, which is why the snapshot
+  // carries per-quarter buckets rather than a single pre-computed "current FY" figure.
+
+  function fyOf(quarterLabel) { return String(quarterLabel).split(' ')[0]; }
+
+  // The selector lives in the Organisation overview subtitle, which renderCoverage
+  // rewrites on every render. So it is a persistent element created once and re-appended,
+  // rather than markup: rebuilding it each time would drop the user's choice and its
+  // change listener.
+  var fySelect = null;
+
+  function fySelectEl() {
+    if (!fySelect) {
+      fySelect = document.createElement('select');
+      fySelect.id = 'bd-fy';
+      fySelect.className = 'fy-select';
+      fySelect.innerHTML = '<option value="all">All time</option>';
+      // Changing the year only re-totals per-quarter buckets already in the snapshot,
+      // so no server round trip is needed.
+      fySelect.addEventListener('change', renderBreakdown);
+    }
+    return fySelect;
+  }
+
+  function selectedFy() {
+    return fySelect ? fySelect.value : 'all';
+  }
+
+  function sumAllQ(byQuarter) {
+    var total = 0;
+    Object.keys(byQuarter || {}).forEach(function (q) { total += byQuarter[q]; });
+    return total;
+  }
+
+  function sumFy(byQuarter, fyLabel) {
+    var total = 0;
+    Object.keys(byQuarter || {}).forEach(function (q) {
+      if (fyOf(q) === fyLabel) total += byQuarter[q];
+    });
+    return total;
+  }
+
+  /** Populate the selector from the quarters the snapshot actually covers. */
+  function buildFySelector(snap) {
+    var sel = fySelectEl();
+    var years = [];
+    (snap.quarters || []).forEach(function (q) {
+      var fy = fyOf(q);
+      if (years.indexOf(fy) === -1) years.push(fy);
+    });
+    var keep = sel.value;
+    sel.innerHTML = '<option value="all">All time</option>' +
+      years.map(function (y) { return '<option value="' + esc(y) + '">' + esc(y) + '</option>'; }).join('');
+    // Preserve the user's choice across refreshes; otherwise default to the current FY,
+    // falling back to the newest year present if the current one has nothing in it.
+    var current = fyOf(snap.currentQuarter || '');
+    if (keep && (keep === 'all' || years.indexOf(keep) !== -1)) sel.value = keep;
+    else if (years.indexOf(current) !== -1) sel.value = current;
+    else if (years.length) sel.value = years[years.length - 1];
+  }
+
+  function renderBreakdown() {
+    if (!snapshot) return;
+    var fy = selectedFy();
+    var isFy = (fy !== 'all');
+    var dims = selectedDims();
+    var statuses = selectedStatuses();
+    var projects = selectedValues('filter-projects');
+    var sources = selectedValues('filter-sources');
+    var rows = (snapshot.breakdownRows || []).filter(function (r) {
+      if (projects.indexOf(r.project) === -1) return false;
+      if (sources.indexOf(r.fundingSource) === -1) return false;
+      if (r.status === 'secured' || r.status === 'proposed') {
+        return statuses.indexOf(r.status) !== -1;
+      }
+      return true;
+    });
+
+    var groups = {};
+    var minStart = null, maxEnd = null;
+    rows.forEach(function (r) {
+      if (r.start && (!minStart || r.start < minStart)) minStart = r.start;
+      if (r.end && (!maxEnd || r.end > maxEnd)) maxEnd = r.end;
+
+      var key = dims.length ? dims.map(function (d) { return r[d]; }).join(' › ') : 'All';
+      if (!groups[key]) {
+        groups[key] = { label: key, dimVals: dims.map(function (d) { return r[d]; }),
+          budget: 0, secured: 0, actual: 0, weighted: 0 };
+      }
+      groups[key].budget += isFy ? sumFy(r.budgetByQ, fy) : r.budget;
+      groups[key].secured += isFy ? sumFy(r.securedByQ, fy) : r.secured;
+      groups[key].actual += isFy ? sumFy(r.actualByQ, fy) : r.actual;
+      // Expected income has no all-time scalar on the row, so sum every quarter for the
+      // all-time view rather than passing a null year into sumFy, which matches nothing.
+      groups[key].weighted += isFy ? sumFy(r.weightedByQ, fy) : sumAllQ(r.weightedByQ);
+    });
+
+    renderCoverage(snapshot.coverage, minStart, maxEnd, isFy ? fy : null);
+
+    var list = Object.keys(groups).map(function (k) { return groups[k]; })
+      .sort(function (a, b) { return b.budget - a.budget; });
+
+    var head = '<tr>' +
+      (dims.length ? dims.map(function (d) { return '<th>' + DIM_LABEL[d] + '</th>'; }).join('')
+                   : '<th>All funding</th>') +
+      '<th class="num">Budget</th><th class="num">Secured</th>' +
+      '<th class="num">Actual</th><th>Spent vs budget</th></tr>';
+    document.getElementById('overview-head').innerHTML = head;
+
+    document.getElementById('overview-body').innerHTML = list.map(function (g) {
+      var pct = g.budget > 0 ? Math.round((g.actual / g.budget) * 100) : 0;
+      var over = pct > 100;
+      var color = over ? COLOR.danger : COLOR.ok;
+      var dimCells = dims.length
+        ? g.dimVals.map(function (v) { return '<td>' + esc(statusLabel(v)) + '</td>'; }).join('')
+        : '<td>All funding</td>';
+      return '<tr>' + dimCells +
+        '<td class="num">' + fmtMoney(g.budget) + '</td>' +
+        '<td class="num">' + fmtMoney(g.secured) + '</td>' +
+        '<td class="num">' + fmtMoney(g.actual) + '</td>' +
+        '<td><div class="bar-row"><div class="bar"><span style="width:' + Math.min(100, pct) +
+          '%;background:' + color + '"></span></div>' +
+          '<span class="pct">' + pct + '%</span></div></td></tr>';
+    }).join('');
+
+    var totBudget = 0, totSecured = 0, totActual = 0, totWeighted = 0;
+    list.forEach(function (g) {
+      totBudget += g.budget;
+      totSecured += g.secured;
+      totActual += g.actual;
+      totWeighted += g.weighted;
+    });
+    var totPct = totBudget > 0 ? Math.round((totActual / totBudget) * 100) : 0;
+    var totColor = totPct > 100 ? COLOR.danger : COLOR.ok;
+    var footCols = dims.length ? dims.length : 1;
+    
+    // Update the TOP Organisation Overview cards so they exactly match the filtered Breakdown
+    document.getElementById('totals').innerHTML =
+      card((isFy ? fy + ' forecast budget' : 'Total forecast budget'), fmtMoney(totBudget)) +
+      card((isFy ? fy + ' secured funding' : 'Secured funding'), fmtMoney(totSecured)) +
+      card((isFy ? fy + ' actual' : 'Actual to date'), fmtMoney(totActual)) +
+      card((isFy ? fy + ' unsecured gap' : 'Unsecured gap'),
+           fmtMoney(Math.max(0, totBudget - totSecured)), 'danger') +
+      card((isFy ? fy + ' gap after pipeline' : 'Gap after pipeline'),
+           fmtMoney(Math.max(0, totBudget - totWeighted)),
+           (totBudget - totWeighted) > 0 ? 'amber' : '');
+
+    var foot = '<tr><td colspan="' + footCols + '">Total</td>' +
+      '<td class="num">' + fmtMoney(totBudget) + '</td>' +
+      '<td class="num">' + fmtMoney(totSecured) + '</td>' +
+      '<td class="num">' + fmtMoney(totActual) + '</td>' +
+      '<td><div class="bar-row"><div class="bar"><span style="width:' + Math.min(100, totPct) +
+      '%;background:' + totColor + '"></span></div>' +
+      '<span class="pct">' + totPct + '%</span></div></td></tr>';
+    document.getElementById('overview-foot').innerHTML = foot;
+  }
+
+  function statusLabel(v) {
+    if (v === 'secured') return 'Secured (confirmed)';
+    if (v === 'proposed') return 'Proposed';
+    return v;
+  }
+
+  // Changing the FY only re-totals per-quarter buckets already in the snapshot, so it
+  // needs no server round trip and no full re-render.
+  Array.prototype.slice.call(document.querySelectorAll('.bd-dim, .bd-status, #bd-fy'))
+    .forEach(function (c) { c.addEventListener('change', renderBreakdown); });
+
+  Array.prototype.slice.call(document.querySelectorAll('#plan-project, #plan-empty'))
+    .forEach(function (c) { c.addEventListener('change', renderPlan); });
+
+  Array.prototype.slice.call(document.querySelectorAll('.pl-dim, .pl-status, .pl-col'))
+    .forEach(function (c) { c.addEventListener('change', function () { renderPlanner(); }); });
+
+  Array.prototype.slice.call(document.querySelectorAll('.bd-dd-actions a')).forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      var id = a.dataset.target, on = a.dataset.act === 'all';
+      Array.prototype.slice.call(document.querySelectorAll('#' + id + ' input'))
+        .forEach(function (i) { i.checked = on; });
+      if (id === 'track-sources') {
+        updateTrackFilterSummary();
+        loadTrackingSelected();
+      } else {
+        updateFilterSummary(id);
+        rerenderFor(id);
+      }
+    });
+  });
+
+  // Close filter dropdowns on outside click (and only keep one open at a time).
+  document.addEventListener('click', function (e) {
+    Array.prototype.slice.call(document.querySelectorAll('.bd-dd[open]')).forEach(function (d) {
+      if (!d.contains(e.target)) d.removeAttribute('open');
+    });
+  });
+  // Close on Escape.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      Array.prototype.slice.call(document.querySelectorAll('.bd-dd[open]'))
+        .forEach(function (d) { d.removeAttribute('open'); });
+    }
+  });
+
+  function card(label, value, cls, note) {
+    return '<div class="card"><div class="label">' + label + '</div>' +
+      '<div class="value ' + (cls || '') + '">' + value + '</div>' +
+      (note ? '<div class="note">' + note + '</div>' : '') + '</div>';
+  }
+
+  // ---- Runway ---------------------------------------------------------------
+  // Funded runway: the month cumulative income stops covering cumulative spend. Not
+  // cash runway; there is no bank balance anywhere in this system. Organisation-wide
+  // and deliberately outside every filter on the page, because "when does the plan go
+  // underwater" does not depend on which project somebody is looking at, and it always
+  // runs from today, so the financial-year selector does not apply either.
+  //
+  // Three lines as an ordinal ramp on the secured green: dark is money in hand, each
+  // lighter step adds money that is less certain. The order never changes, so the
+  // reader sees the nesting in the colour. Validated against the card surface with
+  // the dataviz palette checker; the light end clears the 2:1 floor.
+  var RUNWAY_SERIES = [
+    { key: 'secured',  label: 'Secured only',          color: 'var(--rw-1)' },
+    { key: 'weighted', label: 'Expected (weighted)',   color: 'var(--rw-2)' },
+    { key: 'proposed', label: 'All applications land', color: 'var(--rw-3)' }
+  ];
+  // Tile colour thresholds in months. Presentation only; nothing else reads them.
+  var RUNWAY_DANGER_MONTHS = 6, RUNWAY_AMBER_MONTHS = 12;
+
+  function netMoney(n) { return n < 0 ? '-' + fmtMoney(-n) : fmtMoney(n); }
+  function compactMoney(n) {
+    var a = Math.abs(n), s = n < 0 ? '-$' : '$';
+    if (a >= 1e6) return s + (a / 1e6).toFixed(a >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M';
+    if (a >= 1e3) return s + Math.round(a / 1e3) + 'k';
+    return s + Math.round(a);
+  }
+  function niceStep(raw) {
+    var p = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+    var f = raw / p;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+  }
+  function shortMonth(key) {
+    var p = key.split('-');
+    return MONTHS[parseInt(p[1], 10) - 1] + ' ' + p[0].slice(2);
+  }
+
+  function renderRunway(rw) {
+    var section = document.getElementById('runway-section');
+    if (!section) return;
+    var rows = (rw && rw.months) || [];
+    // Project-scoped users are not sent the runway at all; hide rather than show empty.
+    if (!rows.length) { section.classList.add('hidden'); return; }
+    section.classList.remove('hidden');
+
+    var tiles = document.getElementById('runway-tiles');
+    var chart = document.getElementById('runway-chart');
+    var legend = document.getElementById('runway-legend');
+    var table = document.getElementById('runway-table');
+    var last = rows[rows.length - 1].month;
+    var hasFuture = rows.some(function (r) { return !r.actual; });
+
+    // One line. The GM guide carries the longer explanation.
+    document.getElementById('runway-caption').innerHTML =
+      '<span>Income minus spend, cumulative. <b>Actuals</b> to last month, <b>budget</b> ' +
+      'from this month on. Funded, not cash, and not affected by the filters below.</span>';
+
+    if (!hasFuture) {
+      tiles.innerHTML = '';
+      chart.innerHTML = '<div class="rw-note">No budget lines are dated after this month, ' +
+        'so there is nothing to project. Extend a budget to see runway.</div>';
+      legend.innerHTML = '';
+      table.innerHTML = '';
+      return;
+    }
+
+    var net = rw.openingNet || 0;
+    tiles.innerHTML =
+      card('Net position today', netMoney(net), net < 0 ? 'danger' : '') +
+      RUNWAY_SERIES.map(function (s) { return runwayTile(s, rw, last); }).join('');
+
+    renderRunwayChart(rows, rw, chart);
+
+    legend.innerHTML = RUNWAY_SERIES.map(function (s) {
+      return '<span><i class="sw line" style="background:' + s.color + '"></i> ' +
+        esc(s.label) + '</span>';
+    }).join('');
+    table.innerHTML = runwayTable(rows);
+  }
+
+  function runwayTile(s, rw, lastMonth) {
+    var n = rw.monthsOfRunway ? rw.monthsOfRunway[s.key] : null;
+    var at = rw.crossover ? rw.crossover[s.key] : null;
+    if (n === null || n === undefined) {
+      // No shortfall inside the budgeted horizon. Not the same as safe: it may only
+      // mean the budgets stop, which is why the value names the month they stop.
+      return card(s.label, 'Beyond ' + esc(fmtMonthKey(lastMonth)), '');
+    }
+    var cls = n < RUNWAY_DANGER_MONTHS ? 'danger' : (n < RUNWAY_AMBER_MONTHS ? 'amber' : '');
+    var value = n === 0 ? 'Short now' : n + (n === 1 ? ' month' : ' months');
+    return card(s.label, value, cls, 'short from ' + esc(fmtMonthKey(at)));
+  }
+
+  function renderRunwayChart(rows, rw, host) {
+    // Sized to the container once at render, so text is 1:1 rather than scaled with
+    // the viewBox. If the Overview is hidden when a refresh lands, the fallback width
+    // still scales cleanly because the SVG is also width:100%.
+    var W = Math.max(480, host.clientWidth || 720), H = 240;
+    var padL = 64, padR = 150, padT = 22, padB = 30;
+    var pw = W - padL - padR, ph = H - padT - padB;
+    var n = rows.length;
+    var xStep = pw / Math.max(1, n - 1);
+    var xOf = function (i) { return padL + (n === 1 ? pw / 2 : i * xStep); };
+
+    var nets = {}, lo = 0, hi = 0;
+    RUNWAY_SERIES.forEach(function (s) {
+      nets[s.key] = rows.map(function (r) { return r[s.key] - r.spend; });
+      nets[s.key].forEach(function (v) { if (v < lo) lo = v; if (v > hi) hi = v; });
+    });
+    if (hi === lo) hi = lo + 1;
+    var step = niceStep((hi - lo) / 4);
+    var yMin = Math.floor(lo / step) * step, yMax = Math.ceil(hi / step) * step;
+    var yOf = function (v) { return padT + (yMax - v) / (yMax - yMin) * ph; };
+
+    var svg = ['<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H +
+      '" role="img" aria-label="Net funded position by month, three scenarios">'];
+
+    // Wash and today rule first, so the lines sit on top of them.
+    var firstFuture = -1;
+    for (var i = 0; i < n; i++) { if (!rows[i].actual) { firstFuture = i; break; } }
+    if (firstFuture > 0) {
+      var tx = (xOf(firstFuture - 1) + xOf(firstFuture)) / 2;
+      svg.push('<rect class="rw-future" x="' + tx + '" y="' + padT + '" width="' +
+        (padL + pw - tx) + '" height="' + ph + '"/>');
+      svg.push('<line class="rw-today" x1="' + tx + '" x2="' + tx + '" y1="' + padT +
+        '" y2="' + (padT + ph) + '"/>');
+      svg.push('<text class="rw-axis" x="' + (tx + 4) + '" y="' + (padT - 8) + '">today</text>');
+    } else if (firstFuture === 0) {
+      svg.push('<rect class="rw-future" x="' + padL + '" y="' + padT + '" width="' + pw +
+        '" height="' + ph + '"/>');
+      svg.push('<text class="rw-axis" x="' + padL + '" y="' + (padT - 8) +
+        '">every month shown is budget</text>');
+    }
+
+    // Grid, one hairline per tick, with the zero line a shade stronger.
+    for (var v = yMin; v <= yMax + 1e-9; v += step) {
+      var y = yOf(v);
+      svg.push('<line class="' + (Math.abs(v) < 1e-9 ? 'rw-zero' : 'rw-grid') + '" x1="' +
+        padL + '" x2="' + (padL + pw) + '" y1="' + y + '" y2="' + y + '"/>');
+      svg.push('<text class="rw-axis" x="' + (padL - 8) + '" y="' + (y + 4) +
+        '" text-anchor="end">' + compactMoney(v) + '</text>');
+    }
+    // Month labels thinned to stay at least 56px apart.
+    var every = Math.max(1, Math.ceil(56 / xStep));
+    for (var j = 0; j < n; j += every) {
+      svg.push('<text class="rw-axis" x="' + xOf(j) + '" y="' + (H - 8) +
+        '" text-anchor="middle">' + shortMonth(rows[j].month) + '</text>');
+    }
+
+    // Lines, lightest first so the certain line draws on top. A hollow dot on the zero
+    // line marks each crossover month; the tiles carry the number, so no text here.
+    var ends = [];
+    RUNWAY_SERIES.slice().reverse().forEach(function (s) {
+      var d = nets[s.key].map(function (val, k) {
+        return (k ? 'L' : 'M') + xOf(k).toFixed(1) + ' ' + yOf(val).toFixed(1);
+      }).join(' ');
+      svg.push('<path class="rw-line" style="stroke:' + s.color + '" d="' + d + '"/>');
+      var cross = rw.crossover && rw.crossover[s.key];
+      if (cross) {
+        for (var q = 0; q < n; q++) {
+          if (rows[q].month === cross) {
+            svg.push('<circle class="rw-cross" cx="' + xOf(q) + '" cy="' + yOf(0) +
+              '" r="4"/>');
+            break;
+          }
+        }
+      }
+      ends.push({ s: s, x: xOf(n - 1), y: yOf(nets[s.key][n - 1]) });
+    });
+    // End dots wear a 2px surface ring so they read where lines overlap.
+    ends.forEach(function (e) {
+      svg.push('<circle class="rw-dot" cx="' + e.x + '" cy="' + e.y + '" r="5" fill="' +
+        e.s.color + '"/>');
+    });
+    // Direct labels at the line ends. Where two ends coincide only the more certain
+    // line is labelled and the legend carries the other, rather than stacking text
+    // away from its line.
+    var rank = function (s) { return RUNWAY_SERIES.indexOf(s); };
+    ends.forEach(function (e) {
+      var hidden = ends.some(function (f) {
+        return f !== e && Math.abs(f.y - e.y) < 14 && rank(f.s) < rank(e.s);
+      });
+      if (!hidden) {
+        svg.push('<text class="rw-end" x="' + (e.x + 10) + '" y="' + (e.y + 4) + '">' +
+          esc(e.s.label) + '</text>');
+      }
+    });
+
+    // Crosshair and the hit area, last so the hit area is on top.
+    svg.push('<line id="rw-xh" class="rw-today" style="display:none" y1="' + padT +
+      '" y2="' + (padT + ph) + '"/>');
+    svg.push('<rect id="rw-hit" x="' + padL + '" y="' + padT + '" width="' + pw +
+      '" height="' + ph + '" fill="transparent"/>');
+    svg.push('</svg>');
+    host.innerHTML = svg.join('') + '<div class="rw-tip hidden" id="rw-tip"></div>';
+    host.setAttribute('tabindex', '0');
+    host.setAttribute('aria-label', 'Runway chart. Use the arrow keys to read each month.');
+
+    // Hover layer: the crosshair snaps to the nearest month and one tooltip lists every
+    // series there, so nobody has to land on a 2px line. Same readout on keyboard focus.
+    var tip = document.getElementById('rw-tip');
+    var xh = document.getElementById('rw-xh');
+    var svgEl = host.querySelector('svg');
+    var cur = -1;
+    function row(value, color, label) {
+      var r = document.createElement('div'); r.className = 'r';
+      var b = document.createElement('b'); b.textContent = value; r.appendChild(b);
+      if (color) { var k = document.createElement('i'); k.className = 'k'; k.style.background = color; r.appendChild(k); }
+      var l = document.createElement('span'); l.className = 'l'; l.textContent = label; r.appendChild(l);
+      return r;
+    }
+    function show(i) {
+      if (i < 0 || i >= n) return;
+      cur = i;
+      var x = xOf(i);
+      xh.setAttribute('x1', x); xh.setAttribute('x2', x); xh.style.display = '';
+      while (tip.firstChild) tip.removeChild(tip.firstChild);
+      var m = document.createElement('div'); m.className = 'm';
+      m.textContent = fmtMonthKey(rows[i].month) + (rows[i].actual ? ' · actual' : ' · budget');
+      tip.appendChild(m);
+      RUNWAY_SERIES.forEach(function (s) { tip.appendChild(row(netMoney(nets[s.key][i]), s.color, s.label)); });
+      tip.appendChild(row(fmtMoney(rows[i].spend), null, 'cumulative spend'));
+      tip.classList.remove('hidden');
+      var scale = svgEl.getBoundingClientRect().width / W;
+      var px = x * scale, left = px + 12, tw = tip.offsetWidth || 200;
+      if (left + tw > host.clientWidth - 8) left = px - tw - 12;
+      tip.style.left = Math.max(4, left) + 'px';
+      tip.style.top = (padT * scale + 8) + 'px';
+    }
+    function hide() { xh.style.display = 'none'; tip.classList.add('hidden'); cur = -1; }
+    host.querySelector('#rw-hit').addEventListener('pointermove', function (ev) {
+      var rect = svgEl.getBoundingClientRect();
+      var vx = (ev.clientX - rect.left) * (W / rect.width);
+      show(Math.max(0, Math.min(n - 1, Math.round((vx - padL) / xStep))));
+    });
+    host.addEventListener('pointerleave', hide);
+    host.addEventListener('focus', function () { if (cur < 0) show(firstFuture >= 0 ? firstFuture : 0); });
+    host.addEventListener('blur', hide);
+    host.addEventListener('keydown', function (ev) {
+      if (ev.key === 'ArrowRight') { show(cur < 0 ? 0 : Math.min(n - 1, cur + 1)); ev.preventDefault(); }
+      else if (ev.key === 'ArrowLeft') { show(cur < 0 ? n - 1 : Math.max(0, cur - 1)); ev.preventDefault(); }
+      else if (ev.key === 'Escape') { hide(); }
+    });
+  }
+
+  // The accessibility twin of the chart: every value it draws, reachable without hover.
+  function runwayTable(rows) {
+    var h = '<details class="rw-table"><summary>Show as a table</summary>' +
+      '<div class="table-wrap"><table><thead><tr><th>Month</th><th>Basis</th>' +
+      '<th class="num">Cumulative spend</th>' +
+      RUNWAY_SERIES.map(function (s) {
+        return '<th class="num">Net, ' + esc(s.label.toLowerCase()) + '</th>';
+      }).join('') + '</tr></thead><tbody>';
+    rows.forEach(function (r) {
+      h += '<tr><td>' + esc(fmtMonthKey(r.month)) + '</td><td>' +
+        (r.actual ? 'actual' : 'budget') + '</td>' +
+        '<td class="num">' + fmtMoney(r.spend) + '</td>' +
+        RUNWAY_SERIES.map(function (s) {
+          return '<td class="num">' + netMoney(r[s.key] - r.spend) + '</td>';
+        }).join('') + '</tr>';
+    });
+    return h + '</tbody></table></div></details>';
+  }
+
+  function monthYear(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  function dayMonthYear(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  function renderCoverage(c, overrideStart, overrideEnd, fyLabel) {
+    var el = document.getElementById('coverage');
+    if (!c) { el.innerHTML = ''; return; }
+    var start = overrideStart || c.forecastStart;
+    var end = overrideEnd || c.forecastEnd;
+
+    // The scope text says what is actually on screen. It used to report the all-time
+    // budget span regardless of scope, so it contradicted the FY-scoped cards sitting
+    // directly beneath it, which was a large part of why the Overview read as confusing.
+    var scope = fyLabel
+      ? 'Showing <b>' + esc(fyLabel) + '</b>'
+      : 'Showing <b>all time</b> · budgeted &amp; forecast ' + monthYear(start) +
+        ' – ' + monthYear(end);
+
+    // The selector is rebuilt into this line every render, so its options are preserved
+    // and reattached rather than recreated from scratch. See keepFySelector.
+    el.innerHTML =
+      '<span id="fy-slot"></span>' +
+      '<span>' + scope + '</span>' +
+      '<span class="sep">·</span>' +
+      '<span>Current financial year <b>' + c.fyLabel + '</b> (' + monthYear(c.fyStart) +
+        ' – ' + monthYear(c.fyEnd) + ')</span>';
+    var slot = document.getElementById('fy-slot');
+    if (slot && fySelect) slot.appendChild(fySelect);
+  }
+
+  // ---- Refresh progress ---------------------------------------------------
+  // apiRefresh blocks for about a minute. Apps Script cannot stream, so the server
+  // writes its phase to CacheService and we poll apiRefreshProgress for it.
+  //
+  // The poll only answers if Apps Script runs it concurrently with the refresh. If it
+  // does not, sawProgress stays false and the label says so rather than lying: the
+  // elapsed counter still runs, so the wait is bounded either way.
+  var progressTimer = null, elapsedTimer = null, startedAt = 0, sawProgress = false;
+
+  function showProgress(on) {
+    var box = document.getElementById('refresh-progress');
+    if (box) box.classList.toggle('hidden', !on);
+    if (!on) setBar(0, '');
+  }
+
+  function setBar(pct, label) {
+    var fill = document.getElementById('refresh-bar-fill');
+    var text = document.getElementById('refresh-bar-label');
+    if (fill) fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if (text) text.textContent = label;
+  }
+
+  function elapsedText() {
+    return Math.round((new Date().getTime() - startedAt) / 1000) + 's';
+  }
+
+  function startProgress() {
+    startedAt = new Date().getTime();
+    sawProgress = false;
+    showProgress(true);
+    setBar(0, 'starting… 0s');
+
+    elapsedTimer = setInterval(function () {
+      if (!sawProgress) setBar(0, 'working… ' + elapsedText() + ' (no progress detail)');
+    }, 1000);
+
+    progressTimer = setInterval(function () {
+      google.script.run.withSuccessHandler(function (p) {
+        if (!p) return;                       // finished, or not started yet
+        sawProgress = true;
+        // Prefer the server's overall pct: it bands the phases by measured duration, so
+        // the bar only moves forward. done/total is the fallback for older payloads.
+        var pct = (p.pct === null || p.pct === undefined)
+          ? (p.total > 0 ? (p.done / p.total) * 100 : 0)
+          : p.pct;
+        var counter = p.total > 0 ? ' (' + p.done + ' of ' + p.total + ')' : '';
+        setBar(pct, p.phase + counter + ' · ' + elapsedText());
+      }).withFailureHandler(function () { /* a failed poll must not break the refresh */ })
+        .apiRefreshProgress();
+    }, 1500);
+  }
+
+  function stopProgress() {
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    showProgress(false);
+  }
+
+  function load(force) {
+    var btn = document.getElementById('refresh');
+    btn.disabled = true; btn.textContent = force ? 'Refreshing…' : 'Refresh now';
+    if (force) startProgress();
+    var call = google.script.run
+      .withSuccessHandler(function (s) {
+        stopProgress();
+        render(s); btn.disabled = false; btn.textContent = 'Refresh now';
+      })
+      .withFailureHandler(function (e) {
+        stopProgress();
+        document.getElementById('sync-label').textContent = 'error: ' + e.message;
+        btn.disabled = false; btn.textContent = 'Refresh now';
+      });
+    force ? call.apiRefresh() : call.apiGetSnapshot();
+  }
+
+  document.getElementById('refresh').addEventListener('click', function () { load(true); });
+  load(false);
+
+  // ---- Quarterly tracking view --------------------------------------------
+
+  var tracksLoaded = false;
+
+  function switchView(view) {
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.classList.toggle('active', t.dataset.view === view);
+    });
+    document.getElementById('view-overview').classList.toggle('hidden', view !== 'overview');
+    document.getElementById('view-tracking').classList.toggle('hidden', view !== 'tracking');
+    document.getElementById('view-planner').classList.toggle('hidden', view !== 'planner');
+    // Health needs no lazy load: the findings arrive with the snapshot and renderHealth
+    // has already written them.
+    document.getElementById('view-health').classList.toggle('hidden', view !== 'health');
+    // No lazy load: the plan is derived from breakdownRows, already in the snapshot.
+    document.getElementById('view-plan').classList.toggle('hidden', view !== 'plan');
+    if (view === 'tracking' && !tracksLoaded) { tracksLoaded = true; loadSources(); }
+    if (view === 'planner' && !plannerLoaded) { plannerLoaded = true; loadPlannerProjects(); }
+  }
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () { switchView(t.dataset.view); });
+  });
+
+  var currentEntityIds = [];
+  var currentMeasure = 'cost';
+
+  Array.prototype.slice.call(document.querySelectorAll('.measure')).forEach(function (b) {
+    b.addEventListener('click', function () {
+      currentMeasure = b.dataset.measure;
+      document.querySelectorAll('.measure').forEach(function (x) {
+        x.classList.toggle('active', x === b);
+      });
+      if (currentEntityIds && currentEntityIds.length) loadTracking(currentEntityIds);
+    });
+  });
+
+  var MLAB = {
+    cost:   { base: 'Budget',     actual: 'Actual',      expected: 'Expected',     baseCell: 'budget' },
+    income: { base: 'Budgeted',   actual: 'Received',    expected: 'Expected',     baseCell: 'expected' },
+    net:    { base: 'Budget net', actual: 'Net to date', expected: 'Expected net', baseCell: 'net' }
+  };
+
+  function loadSources() {
+    var box = document.getElementById('track-sources');
+    var sum = document.getElementById('track-sources-sum');
+    sum.textContent = 'loading…';
+    google.script.run.withSuccessHandler(function (list) {
+      if (!list.length) { sum.textContent = 'nothing to track'; return; }
+      box.innerHTML = list.map(function (s) {
+        return '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.label) + '</label>';
+      }).join('');
+      box.querySelector('input').checked = true;
+      
+      Array.prototype.slice.call(box.querySelectorAll('input')).forEach(function (i) {
+        i.addEventListener('change', function () { 
+          updateTrackFilterSummary(); 
+          loadTrackingSelected();
+        });
+      });
+      updateTrackFilterSummary();
+      loadTrackingSelected();
+    }).withFailureHandler(trackError).apiListSources();
+  }
+
+  function updateTrackFilterSummary() {
+    var box = document.getElementById('track-sources');
+    var all = box.querySelectorAll('input');
+    var on = box.querySelectorAll('input:checked');
+    var sum = document.getElementById('track-sources-sum');
+    if (on.length === 0) sum.textContent = 'Select sources...';
+    else if (on.length === 1) {
+      sum.textContent = on[0].parentElement.textContent.trim();
+    } else if (on.length === all.length) {
+      sum.textContent = 'All sources';
+    } else {
+      sum.textContent = on.length + ' sources selected';
+    }
+  }
+
+  function loadTrackingSelected() {
+    var on = document.querySelectorAll('#track-sources input:checked');
+    var ids = Array.prototype.slice.call(on).map(function(i) { return i.value; });
+    if (ids.length === 0) {
+      document.getElementById('track-grid').innerHTML = '';
+      document.getElementById('track-totals').innerHTML = '';
+      document.getElementById('track-sheet-links').innerHTML = '';
+      document.getElementById('track-status').textContent = 'No sources selected.';
+      return;
+    }
+    loadTracking(ids);
+  }
+
+  function loadTracking(ids) {
+    currentEntityIds = ids;
+    document.getElementById('track-status').textContent = 'loading…';
+    google.script.run.withSuccessHandler(renderTracking)
+      .withFailureHandler(trackError).apiGetTracking(ids, currentMeasure);
+  }
+
+  function trackError(e) {
+    document.getElementById('track-status').textContent = 'error: ' + e.message;
+  }
+
+  function renderTracking(t) {
+    var measure = t.measure || 'cost';
+    var lab = MLAB[measure];
+    document.querySelectorAll('.measure').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.measure === measure);
+    });
+    var meta = (t.type === 'project' ? 'project' : (t.type === 'composite' ? t.label : (t.status + ' · ' + t.project)));
+    document.getElementById('track-status').textContent =
+      meta + ' · ' + measure + ' · current ' + t.currentQuarter;
+
+    // Sheet links — render into header bar (next to source selector)
+    var linkEl = document.getElementById('track-sheet-links');
+    if (t.sheetUrls) {
+      var urls = t.sheetUrls;
+      var links = Object.keys(urls).map(function (src) {
+        return '<a href="' + urls[src] + '" target="_blank" title="Open ' + src + ' spreadsheet">📄 ' + src + '</a>';
+      });
+      linkEl.innerHTML = links.join(' · ');
+    } else {
+      linkEl.innerHTML = '';
+    }
+
+    // Build zone spans for the two-tier header
+    var actualCount = 0, forecastCount = 0;
+    t.columns.forEach(function (col) {
+      if (col.past || col.current) actualCount++;
+      else forecastCount++;
+    });
+
+    var spanRow = '<tr class="zone-row"><th class="mile"></th>';
+    if (actualCount) spanRow += '<th colspan="' + actualCount + '" class="zone-actual">ACTUAL <span class="zone-src">from Xero</span></th>';
+    if (forecastCount) spanRow += '<th colspan="' + forecastCount + '" class="zone-forecast">FORECAST <span class="zone-src">from gsheet</span></th>';
+    spanRow += '<th colspan="5" class="zone-totals">TOTALS</th></tr>';
+
+    var head = '<thead>' + spanRow + '<tr><th class="mile">Milestone</th>' +
+      t.columns.map(function (col) {
+        var zone = (col.past || col.current) ? ' col-actual' : ' col-forecast';
+        if (col.current) zone += ' col-current';
+        var cls = zone + (col.type === 'aggregate' ? ' agg' : '');
+        return '<th class="' + cls.trim() + '">' + esc(col.label) + '</th>';
+      }).join('') +
+      '<th class="tot">' + lab.base + '</th><th class="tot">' + lab.actual + '</th>' +
+      '<th class="tot" title="Only quarters with an entry on the Forecast tab. ' +
+      'Quarters with no entry fall back to the budget baseline for Expected and ' +
+      'Variance, but are not counted here.">Forecast entered</th>' +
+      '<th class="tot">Variance</th>' +
+      '<th class="cmt-h">Comment</th></tr></thead>';
+
+    var body = '<tbody>' + t.milestones.map(function (m) {
+      var cells = m.cells.map(function (c, i) {
+        var col = t.columns[i];
+        var zone = (col.past || col.current) ? ' col-actual' : ' col-forecast';
+        if (col.current) zone += ' col-current';
+        var cls = zone + (col.type === 'aggregate' ? ' agg' : '');
+
+        if (col.current && col.type === 'quarter') {
+          // Current quarter: both values at same size with labels
+          var fcLine = c.hasForecast
+            ? '<span class="cell-actual">forecast ' + money0(c.forecast) + '</span>'
+            : '';
+          return '<td class="' + cls.trim() + '"><div class="cell-q">' +
+            '<span class="cell-actual">actual ' + money0(c.actual) + '</span>' +
+            fcLine +
+            '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
+        }
+        if (col.past || col.type === 'aggregate') {
+          // Past / aggregate: actual (main) + budget sub-label
+          return '<td class="' + cls.trim() + '"><div class="cell-q">' +
+            '<span class="cell-actual">' + money0(c.actual) + '</span>' +
+            '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
+        }
+        // Future: the Forecast-tab override when present, otherwise the budget
+        // baseline — which is what counts toward Expected. A dash here used to
+        // imply the cell contributed nothing, which was never true.
+        if (!c.hasForecast) {
+          return '<td class="' + cls.trim() + '"><div class="cell-q">' +
+            '<span class="no-fc">' + money0(c.baseline) + '</span>' +
+            '<span class="cell-base">budget, no override</span></div></td>';
+        }
+        return '<td class="' + cls.trim() + '"><div class="cell-q">' +
+          '<span class="cell-actual">' + money0(c.forecast) + '</span>' +
+          '<span class="cell-base">budget ' + money0(c.baseline) + '</span></div></td>';
+      }).join('');
+
+      // Forecast means what has actually been forecast: only cells with an override.
+      // It used to add the budget baseline for quarters with no override, so a milestone
+      // forecast to Q2 reported a Forecast total spanning Q3 and Q4 as well, and there was
+      // no way to tell the entered figures from the inferred ones. The baseline still
+      // drives Expected and Variance, which is a different question: what we expect to
+      // spend, rather than what we have said we will.
+      var forecastTotal = 0;
+      m.cells.forEach(function (c, i) {
+        var col = t.columns[i];
+        if (!col.past && col.type === 'quarter' && c.hasForecast) forecastTotal += c.forecast;
+      });
+
+      return '<tr><td class="mile">' + esc(m.milestone) + '</td>' + cells +
+        '<td class="tot">' + money0(m.baselineTotal) + '</td>' +
+        '<td class="tot">' + money0(m.actualToDate) + '</td>' +
+        '<td class="tot">' + money0(Math.round(forecastTotal)) + '</td>' +
+        '<td class="tot ' + varClassM(m.variance, measure) + '">' + signed(m.variance) + '</td>' +
+        '<td class="cmt-c">' + (m.comment ? '<span class="cmt-text">' + esc(m.comment) + '</span>' : '') + '</td></tr>';
+    }).join('') + '</tbody>';
+
+    // Compute footer totals
+    var totForecast = 0;
+    t.milestones.forEach(function (m) {
+      m.cells.forEach(function (c, i) {
+        var col = t.columns[i];
+        if (!col.past && col.type === 'quarter' && c.hasForecast) totForecast += c.forecast;
+      });
+    });
+
+    var foot = '<tfoot><tr><td class="mile">Total</td>' +
+      t.colTotals.map(function (c, i) {
+        var col = t.columns[i];
+        var zone = (col.past || col.current) ? ' col-actual' : ' col-forecast';
+        if (col.current) zone += ' col-current';
+        var cls = zone + (col.type === 'aggregate' ? ' agg' : '');
+        return '<td class="' + cls.trim() + '">' + money0(c.effective) + '</td>';
+      }).join('') +
+      '<td class="tot">' + money0(t.totals.baseline) + '</td>' +
+      '<td class="tot">' + money0(t.totals.actual) + '</td>' +
+      '<td class="tot">' + money0(Math.round(totForecast)) + '</td>' +
+      '<td class="tot ' + varClassM(t.totals.variance, measure) + '">' + signed(t.totals.variance) + '</td>' +
+      '<td></td></tr></tfoot>';
+
+    document.getElementById('track-grid').innerHTML = '<table id="track-grid-table">' + head + body + foot + '</table>';
+
+    document.getElementById('track-totals').innerHTML =
+      tot(lab.base, money0(t.totals.baseline)) +
+      tot(lab.actual + ' to date', money0(t.totals.actual)) +
+      tot(lab.expected + ' (actual + forecast)', money0(t.totals.expected)) +
+      tot('Variance', '<span class="' + varClassM(t.totals.variance, measure) + '">' +
+        signed(t.totals.variance) + '</span>');
+  }
+
+  function money0(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('en-NZ'); }
+  function signed(n) { n = Math.round(n); return (n > 0 ? '+' : '') + money0(n).replace('$-', '-$'); }
+  function varClass(n) { return n > 0 ? 'var-pos' : (n < 0 ? 'var-neg' : ''); }
+  // For cost, spending over budget (positive variance) is bad (red). For income
+  // and net, exceeding budget (positive) is good (green) - so invert.
+  function varClassM(n, measure) {
+    if (n === 0) return '';
+    var favourable = (measure === 'cost') ? (n < 0) : (n > 0);
+    return favourable ? 'var-neg' : 'var-pos';
+  }
+  function tot(label, val) { return '<span><span class="lbl">' + label + '</span>' + val + '</span>'; }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // ---- Project planner view -----------------------------------------------
+
+  var plannerLoaded = false;
+
+  function loadPlannerProjects() {
+    var sel = document.getElementById('planner-project');
+    document.getElementById('planner-status').textContent = 'loading projects…';
+    google.script.run.withSuccessHandler(function (projects) {
+      if (!projects.length) {
+        document.getElementById('planner-status').textContent = 'No projects found.';
+        return;
+      }
+      sel.innerHTML = projects.map(function (p) {
+        return '<option value="' + esc(p) + '">' + esc(p) + '</option>';
+      }).join('');
+      sel.addEventListener('change', function () { loadPlannerTimeline(sel.value); });
+      loadPlannerTimeline(projects[0]);
+    }).withFailureHandler(function (e) {
+      document.getElementById('planner-status').textContent = 'error: ' + e.message;
+    }).apiListProjects();
+  }
+
+  var PROJECT_LINKS = {
+    'Spyfish Aotearoa': 'https://drive.google.com/drive/folders/1ibbPTQS2yMFf7H1FQKIoqUpKm9r3B6cL?usp=drive_link',
+    'General': 'https://drive.google.com/drive/folders/1z8bG15aUiCQBqJg8mV6Ls4c9tDeYl9ZP?usp=drive_link',
+    'Wildlife Watcher': 'https://drive.google.com/drive/folders/189qkgjD-aNoxAyNCLEpwJJG0ZHN_pJMZ?usp=drive_link',
+    'Wild About Ai': 'https://drive.google.com/drive/folders/1Qy-ScHTTDa4VyrURVkDJzK5LzhewKXsP?usp=drive_link'
+  };
+
+  function updatePlannerProjectLink(projectName) {
+    var linkEl = document.getElementById('planner-project-link');
+    if (linkEl) {
+      if (PROJECT_LINKS[projectName]) {
+        linkEl.href = PROJECT_LINKS[projectName];
+        linkEl.classList.remove('hidden');
+      } else {
+        linkEl.classList.add('hidden');
+      }
+    }
+  }
+
+  function loadPlannerTimeline(projectName) {
+    updatePlannerProjectLink(projectName);
+    document.getElementById('planner-status').textContent = 'loading…';
+    google.script.run.withSuccessHandler(function (milestones) {
+        buildPlannerSources(milestones);
+        renderPlanner(milestones);
+      })
+      .withFailureHandler(function (e) {
+        document.getElementById('planner-status').textContent = 'error: ' + e.message;
+      }).apiGetTimeline(projectName);
+  }
+
+  /** Build an ordered array of month keys ('YYYY-MM') for the Gantt columns. */
+  function monthRange(startKey, endKey) {
+    var out = [];
+    var p = startKey.split('-');
+    var y = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    while (true) {
+      var key = y + '-' + ('0' + m).slice(-2);
+      out.push(key);
+      if (key >= endKey) break;
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+    return out;
+  }
+
+  function fmtMonthShort(key) {
+    var p = key.split('-');
+    return MONTHS[parseInt(p[1], 10) - 1] + ' ' + p[0].slice(-2);
+  }
+
+  // Held so the controls can re-render without another server round trip: the timeline
+  // for one project is a single fetch, and filtering it is arithmetic over what came back.
+  var plannerData = null;
+
+  function plSelected(cls) {
+    return Array.prototype.slice.call(document.querySelectorAll('.' + cls + ':checked'))
+      .map(function (c) { return c.value; });
+  }
+
+  /** Funding-source filter for the planner, built from whatever the timeline returned. */
+  function buildPlannerSources(milestones) {
+    var seen = {};
+    (milestones || []).forEach(function (m) {
+      (m.segments || []).forEach(function (seg) { seen[seg.source] = true; });
+    });
+    fillFilter('pl-sources', Object.keys(seen).sort());
+  }
+
+  function renderPlanner(milestones) {
+    if (milestones) plannerData = milestones;
+    milestones = plannerData;
+    var grid = document.getElementById('planner-grid');
+    var status = document.getElementById('planner-status');
+
+    if (!milestones || !milestones.length) {
+      grid.innerHTML = '<div style="padding:24px;color:var(--muted)">' +
+        'No milestones found for this project.</div>';
+      status.textContent = '';
+      return;
+    }
+
+    var statuses = plSelected('pl-status');
+    var dims = plSelected('pl-dim');
+    var cols = plSelected('pl-col');
+    var sources = selectedValues('pl-sources');
+
+    var hStart = milestones[0].horizonStart;
+    var hEnd = milestones[0].horizonEnd;
+    var months = monthRange(hStart, hEnd);
+    var todayKey = new Date().getFullYear() + '-' +
+      ('0' + (new Date().getMonth() + 1)).slice(-2);
+
+    // One row per milestone, or per milestone and group when grouping is on. A milestone
+    // funded by two sources becomes two rows under "group by: Funding source", which is
+    // the point: you can see which grant pays for which stretch of the work.
+    var rows = [];
+    milestones.forEach(function (m) {
+      var segs = (m.segments || []).filter(function (seg) {
+        if (statuses.indexOf(seg.status) === -1) return false;
+        if (sources.length && sources.indexOf(seg.source) === -1) return false;
+        return true;
+      });
+      if (!segs.length) return;
+      if (!dims.length) {
+        rows.push({ milestone: m.milestone, group: '', segments: segs });
+        return;
+      }
+      var groups = {};
+      segs.forEach(function (seg) {
+        var key = dims.map(function (d) {
+          return d === 'fundingSource' ? seg.source : statusLabel(seg.status);
+        }).join(' › ');
+        (groups[key] = groups[key] || []).push(seg);
+      });
+      Object.keys(groups).sort().forEach(function (k) {
+        rows.push({ milestone: m.milestone, group: k, segments: groups[k] });
+      });
+    });
+
+    if (!rows.length) {
+      grid.innerHTML = '<div style="padding:24px;color:var(--muted)">' +
+        'Nothing matches the current filters.</div>';
+      status.textContent = '0 of ' + milestones.length + ' milestones shown';
+      return;
+    }
+
+    var COL_LABEL = { cost: 'Cost', income: 'Income', pl: 'Profit &amp; loss' };
+    var head = '<thead><tr><th>Milestone</th>' +
+      cols.map(function (c) {
+        return '<th class="num gantt-fig">' + COL_LABEL[c] + '</th>';
+      }).join('') +
+      months.map(function (mk) {
+        return '<th class="' + (mk === todayKey ? 'today-col' : '') + '">' +
+          fmtMonthShort(mk) + '</th>';
+      }).join('') + '</tr></thead>';
+
+    var totals = { cost: 0, income: 0 };
+    var body = '<tbody>' + rows.map(function (row) {
+      var cost = 0, income = 0;
+      row.segments.forEach(function (seg) {
+        cost += seg.cost || 0;
+        income += seg.income || 0;
+      });
+      totals.cost += cost;
+      totals.income += income;
+
+      var labelTd = '<td class="gantt-label">' + esc(row.milestone) +
+        (row.group ? '<span class="gantt-sub">' + esc(row.group) + '</span>' : '') + '</td>';
+
+      var figTds = cols.map(function (c) {
+        var v = c === 'cost' ? cost : (c === 'income' ? income : income - cost);
+        var cls = 'num gantt-fig' + (c === 'pl' ? (v < 0 ? ' neg' : ' pos') : '');
+        return '<td class="' + cls + '">' + money0(v) + '</td>';
+      }).join('');
+
+      // monthKey -> the segment covering it. A later segment wins, matching how the grid
+      // reads: the most recently declared funding for that month.
+      var coverage = {};
+      row.segments.forEach(function (seg) {
+        if (!seg.start || !seg.end) return;
+        monthRange(seg.start, seg.end).forEach(function (mk) {
+          if (mk >= hStart && mk <= hEnd) {
+            coverage[mk] = { source: seg.source, status: seg.status,
+              cost: (seg.monthlyCost || {})[mk] || 0,
+              income: (seg.monthlyIncome || {})[mk] || 0 };
+          }
+        });
+      });
+
+      var cells = '';
+      var i = 0;
+      while (i < months.length) {
+        var mk = months[i];
+        var cov = coverage[mk];
+        if (!cov) {
+          cells += '<td class="gantt-cell' + (mk === todayKey ? ' today-col' : '') + '"></td>';
+          i++;
+          continue;
+        }
+        // Merge consecutive months funded by the same source into a single bar.
+        var runStart = i;
+        var runSource = cov.source;
+        var runStatus = cov.status;
+        var runCost = cov.cost;
+        var runIncome = cov.income;
+        while (i + 1 < months.length && coverage[months[i + 1]] &&
+               coverage[months[i + 1]].source === runSource) {
+          i++;
+          runCost += coverage[months[i]].cost || 0;
+          runIncome += coverage[months[i]].income || 0;
+        }
+        var span = i - runStart + 1;
+        var todayCls = '';
+        for (var ci = runStart; ci <= i; ci++) {
+          if (months[ci] === todayKey) todayCls = ' today-col';
+        }
+        var tip = runSource + ' (' + runStatus + ') · cost ' + money0(runCost) +
+          ' · income ' + money0(runIncome);
+        cells += '<td class="gantt-cell' + todayCls + '" colspan="' + span + '">' +
+          '<div class="gantt-seg ' +
+          (runStatus === 'secured' ? 'seg-secured' : 'seg-proposed') +
+          '" style="left:2px;right:2px">' + (span >= 3 ? esc(runSource) : '') +
+          '<span class="seg-tip">' + esc(tip) + '</span></div></td>';
+        i++;
+      }
+      return '<tr>' + labelTd + figTds + cells + '</tr>';
+    }).join('') + '</tbody>';
+
+    var foot = '';
+    if (cols.length) {
+      foot = '<tfoot><tr><td>Total</td>' + cols.map(function (c) {
+        var v = c === 'cost' ? totals.cost
+              : (c === 'income' ? totals.income : totals.income - totals.cost);
+        var cls = 'num gantt-fig' + (c === 'pl' ? (v < 0 ? ' neg' : ' pos') : '');
+        return '<td class="' + cls + '">' + money0(v) + '</td>';
+      }).join('') + '<td colspan="' + months.length + '"></td></tr></tfoot>';
+    }
+
+    grid.innerHTML = '<table class="gantt">' + head + body + foot + '</table>';
+    status.textContent = rows.length + ' row(s) · ' + fmtMonthShort(hStart) +
+      ' – ' + fmtMonthShort(hEnd);
+  }
+
+</script>
