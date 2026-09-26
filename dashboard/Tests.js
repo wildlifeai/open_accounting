@@ -320,6 +320,46 @@ function runTests() {
       .indexOf('D4') !== -1);
   check('D5 catches a started grant with nothing coded to it',
     idsFor([sheet_()], []).indexOf('D5') !== -1);
+
+  // D5 asks whether spend was expected in a finished quarter, by the grid's own rule,
+  // not whether Funding start has passed. Mirrors SPY_27_MAINT: contract from August,
+  // work scheduled later, nothing coded, which is correct and must stay quiet.
+  function d5Line(start) {
+    return [{ description: 'Delivery lead', milestone: 'Delivery',
+      item: 'XXX_27_GOOD_001 - Delivery', project: 'General', start: start,
+      end: d(2027, 3, 31), cost: 10000, income: 10000, contribution: 0 }];
+  }
+  function d5Fc(amount) {
+    var c = {}; c['XXX_27_GOOD_001||26/27 Q1'] = amount;
+    return { cost: c, income: {}, comments: {} };
+  }
+  check('D5 quiet when the work is scheduled after the funding start',
+    idsFor([sheet_({ lines: d5Line(d(2026, 10, 1)) })], []).indexOf('D5') === -1);
+  // A written 0 is a statement: nothing that quarter. D5 takes it at its word.
+  check('D5 quiet when the Forecast says 0 for the finished quarter',
+    idsFor([sheet_({ forecast: d5Fc(0) })], []).indexOf('D5') === -1);
+  // The forecast wins both ways: spend moved into a finished quarter counts.
+  check('D5 fires when the Forecast moved spend into a finished quarter',
+    idsFor([sheet_({ lines: d5Line(d(2026, 10, 1)), forecast: d5Fc(500) })], [])
+      .indexOf('D5') !== -1);
+  // Quiet through the quarter in which spend begins, however late in it we are.
+  check('D5 quiet during the first quarter spend is expected',
+    idsFor([sheet_({ lines: d5Line(d(2026, 7, 1)) })], []).indexOf('D5') === -1);
+  var d5 = buildHealth([sheet_()], [], { now: NOW, xeroConnected: true })
+    .filter(function (f) { return f.id === 'D5'; })[0];
+  check('D5 amount is the spend expected to date, not the whole budget',
+    d5 && d5.amount > 0 && d5.amount < 10000);
+  check('D5 detail names the end of the last finished quarter',
+    d5 && d5.detail.indexOf('2026-06-30') !== -1);
+
+  check('forecastOrBaseline_: an entry wins, a 0 included',
+    forecastOrBaseline_({ q: 0 }, { q: 900 }, 'q') === 0 &&
+    forecastOrBaseline_({ q: 400 }, { q: 900 }, 'q') === 400);
+  check('forecastOrBaseline_: a blank falls back to the baseline',
+    forecastOrBaseline_({}, { q: 900 }, 'q') === 900 &&
+    forecastOrBaseline_(undefined, undefined, 'q') === 0);
+  check('quarterStartDate_ rolls Q4 into the next calendar year',
+    isoDate_(quarterStartDate_(qiOfDate_(d(2027, 2, 10)))) === '2027-01-01');
   // The stale repeating-journal detector: nothing in Xero reports one.
   check('D6 catches spend dated after the grant ended',
     idsFor([sheet_()], [spend_(500, '2027-06-01')]).indexOf('D6') !== -1);

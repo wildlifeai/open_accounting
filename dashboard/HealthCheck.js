@@ -94,8 +94,9 @@ const HEALTH_CATALOGUE = {
     title: 'Actuals coded to a funding source with no budget sheet',
     action: 'Either the sheet is missing, or the Xero tag is a typo.' },
   D5: { severity: 'warning', category: 'Xero coding',
-    title: 'Secured grant under way with no actuals at all',
-    action: 'Nothing is being coded to it. Usually a missing or misspelt Xero tag.' },
+    title: 'Spend was expected, nothing is coded',
+    action: 'Usually a missing or misspelt Xero tag. If the work has slipped, enter 0 ' +
+      'for those quarters on the Forecast tab.' },
   D6: { severity: 'error', category: 'Xero coding',
     title: 'Actuals dated after the grant ended',
     action: 'Almost always a stale repeating journal or template still pointing here.' },
@@ -391,11 +392,25 @@ function buildHealth(budgets, actualLines, ctx) {
       const start = parseSheetDate_(meta['funding start']);
       const end = parseSheetDate_(meta['funding end']);
 
-      // D5: a secured grant that has started and had nothing coded to it is almost
-      // always a Xero tag that does not match the sheet name.
-      if (b.status === 'secured' && start && now && start < now && actual === 0) {
-        add('D5', withBase_(bse, { amount: Math.round(cost),
-          detail: 'started ' + isoDate_(start) + ' with no actuals coded to it at all' }));
+      // D5: a secured grant that should have spent something by now, with nothing coded
+      // to it, is almost always a Xero tag that does not match the sheet name. "Should
+      // have" is the tracking grid's own rule, forecastOrBaseline_, over quarters already
+      // finished. It used to ask only whether Funding start had passed, which flagged
+      // every grant whose contract began before its work was scheduled to. Finished
+      // quarters only, so it stays quiet while the first quarter of spend is under way;
+      // a misspelt tag is caught sooner than that, by D4.
+      if (b.status === 'secured' && now && actual === 0) {
+        const curQi = qiOfDate_(now);
+        const exp = expectedCostByQuarter_(b);
+        const due = Object.keys(exp)
+          .reduce((t, q) => (qiOfLabel_(q) < curQi ? t + exp[q] : t), 0);
+        if (due >= 1) {
+          const qs = quarterStartDate_(curQi);
+          add('D5', withBase_(bse, { amount: Math.round(due),
+            detail: Math.round(due) + ' expected by ' +
+              isoDate_(new Date(qs.getFullYear(), qs.getMonth(), 0)) +
+              ', nothing coded to it at all' }));
+        }
       }
 
       // E1: overspend against the sheet's own budget.
