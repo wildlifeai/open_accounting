@@ -114,7 +114,7 @@ the budget baseline, so an absent tab legitimately means "the budget is still ou
 |---|---|---|---|
 | _(none implemented yet, see below)_ | | | |
 | E1 | warning | Actuals exceed budget for a funding source | Re-budget or explain to the funder. |
-| E2 | warning | Under-spend risk: proportion spent well below proportion of period elapsed | Funders care about underspend as much as overspend. |
+| E2 | warning | A secured source has spent well below what was expected by the end of the last finished quarter, by the same rule as D5 | Funders care about underspend as much as overspend. Fires once at least half the budget was due (`UNDERSPEND_MIN_DUE`) and the shortfall is a quarter of the budget or more (`UNDERSPEND_GAP`). Spend so far this quarter counts toward catching up. If the work has slipped, move it to later quarters on the `Forecast` tab. |
 | E3 | error | Same item code in two funding sources | One cost billed twice. |
 | E4 | warning | Same `*Account` + `Description` in two sources with overlapping dates | Double-funding signal — e.g. the same FTE in two grants. |
 

@@ -366,12 +366,44 @@ function runTests() {
 
   check('E1 catches overspend',
     idsFor([sheet_()], [spend_(12000, '2026-07-01')]).indexOf('E1') !== -1);
-  // Under half the period elapsed, so it stays quiet even though almost nothing is spent.
-  check('E2 stays quiet before the halfway point',
+  // Under half the budget due by the end of June, so quiet though almost nothing is spent.
+  check('E2 stays quiet before half the budget is due',
     idsFor([sheet_()], [spend_(100, '2026-07-01')]).indexOf('E2') === -1);
-  check('E2 fires once a grant is over half elapsed and well underspent',
+  // E2 judges the schedule, not the funding dates, the same way D5 does. Under the old
+  // rule this fired: the contract "ends" in September while the budget runs to March, so
+  // three quarters of the period looked elapsed with a quarter of the money due.
+  check('E2 quiet when the funding dates run ahead of the schedule',
     idsFor([sheet_({ metadata: { 'funding end': '30/Sep/26' } })],
-           [spend_(100, '2026-05-01')]).indexOf('E2') !== -1);
+           [spend_(100, '2026-05-01')]).indexOf('E2') === -1);
+  // Twelve months to September: three quarters of it was due by the end of June.
+  function e2Sheet(over) {
+    var o = { lines: [{ description: 'Delivery lead', milestone: 'Delivery',
+      item: 'XXX_27_GOOD_001 - Delivery', project: 'General', start: d(2025, 10, 1),
+      end: d(2026, 9, 30), cost: 12000, income: 12000, contribution: 0 }] };
+    Object.keys(over || {}).forEach(function (k) { o[k] = over[k]; });
+    return sheet_(o);
+  }
+  check('E2 fires when well under what the schedule expected',
+    idsFor([e2Sheet()], [spend_(2000, '2026-03-01')]).indexOf('E2') !== -1);
+  check('E2 counts this quarter\'s spend toward catching up',
+    idsFor([e2Sheet()], [spend_(2000, '2026-03-01'), spend_(6000, '2026-08-01')])
+      .indexOf('E2') === -1);
+  var e2Slipped = { cost: {}, income: {}, comments: {} };
+  ['25/26 Q3', '25/26 Q4', '26/27 Q1'].forEach(function (q) {
+    e2Slipped.cost['XXX_27_GOOD_001||' + q] = 0;
+  });
+  check('E2 respects a Forecast that moved the work later',
+    idsFor([e2Sheet({ forecast: e2Slipped })], [spend_(2000, '2026-03-01')])
+      .indexOf('E2') === -1);
+  check('E2 ignores an application that has not been won',
+    idsFor([e2Sheet({ status: 'proposed' })], [spend_(2000, '2026-03-01')])
+      .indexOf('E2') === -1);
+  var e2 = buildHealth([e2Sheet()], [spend_(2000, '2026-03-01')],
+    { now: NOW, xeroConnected: true }).filter(function (f) { return f.id === 'E2'; })[0];
+  check('E2 amount is the shortfall against the schedule, not the unspent budget',
+    e2 && e2.amount > 0 && e2.amount < 12000 - 2000);
+  check('E2 detail names the date the spend was expected by',
+    e2 && e2.detail.indexOf('2026-06-30') !== -1);
 
   check('E3 catches one item code in two sources',
     idsFor([sheet_(), sheet_({ name: 'XXX_27_OTHER',
