@@ -52,6 +52,18 @@
         <section class="cards" id="totals"></section>
       </div>
 
+      <!-- Runway sits above the Breakdown and its filters on purpose: it is
+           organisation-wide and runs from today, so neither the filters nor the
+           financial-year selector apply to it, and the layout should say so. -->
+      <div class="overview-section hidden" id="runway-section">
+        <h2>Runway</h2>
+        <div class="coverage" id="runway-caption"></div>
+        <section class="cards" id="runway-tiles"></section>
+        <div class="rw-wrap" id="runway-chart"></div>
+        <div class="legend" id="runway-legend"></div>
+        <div id="runway-table"></div>
+      </div>
+
       <div class="overview-section">
         <div class="breakdown-head">
           <h2>Breakdown</h2>

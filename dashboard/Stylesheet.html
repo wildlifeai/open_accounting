@@ -4,6 +4,10 @@
     --text: #1d1c1a; --muted: #5f5e5a; --hint: #888780;
     --green: #1D9E75; --amber: #EF9F27; --red: #E24B4A;
     --danger-text: #A32D2D; --amber-text: #854F0B;
+    /* Runway lines: an ordinal ramp on the secured green. Dark is money in hand; each
+       lighter step adds money that is less certain. Validated against the card surface
+       with the dataviz palette checker (light end 2.37:1, above the 2:1 floor). */
+    --rw-1: #0F6B4D; --rw-2: #1D9E75; --rw-3: #4DBB93;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg2); color: var(--text);
@@ -82,6 +86,38 @@
   .card .label { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
   .card .value { font-size: 23px; font-weight: 500; }
   .card .value.danger { color: var(--red); }
+  .card .value.amber { color: var(--amber-text); }
+  .card .note { font-size: 12px; color: var(--hint); margin-top: 4px; }
+
+  /* Runway chart. Marks are thin, chrome is hairline, and the only loud thing is the data. */
+  .rw-wrap { position: relative; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 8px 4px; margin-top: 12px; outline: none; }
+  .rw-wrap:focus-visible { box-shadow: 0 0 0 2px var(--green); }
+  .rw-wrap svg { display: block; width: 100%; height: auto; font-size: 11px; }
+  .rw-axis { fill: var(--hint); }
+  .rw-grid { stroke: var(--line); stroke-width: 1; }
+  .rw-zero, .rw-today { stroke: rgba(0,0,0,.35); stroke-width: 1; }
+  .rw-future { fill: var(--bg2); }
+  .rw-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .rw-dot { stroke: var(--bg); stroke-width: 2; }
+  .rw-cross { fill: var(--bg); stroke: rgba(0,0,0,.45); stroke-width: 1.5; }
+  .rw-end { fill: var(--muted); font-size: 12px; }
+  .rw-note { font-size: 13px; color: var(--muted); padding: 8px 6px 12px; }
+  .rw-tip { position: absolute; pointer-events: none; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.08); min-width: 200px; z-index: 2; }
+  .rw-tip .m { font-weight: 500; margin-bottom: 4px; }
+  .rw-tip .r { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .rw-tip .r b { min-width: 76px; text-align: right; font-variant-numeric: tabular-nums; }
+  .rw-tip .k { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+  .rw-tip .l { color: var(--muted); }
+  .sw.line { width: 14px; height: 2px; border-radius: 1px; }
+  .rw-table { margin-top: 10px; font-size: 12px; }
+  .rw-table summary { cursor: pointer; color: var(--muted); }
+  /* Scrolls rather than clips: this table is the chart's accessibility twin, so a
+     column hidden at narrow widths would defeat the point. */
+  .rw-table .table-wrap { margin-top: 8px; overflow-x: auto; }
+  .rw-table td, .rw-table th { padding: 5px 10px; }
 
   .table-wrap { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
   table { width: 100%; border-collapse: collapse; }
