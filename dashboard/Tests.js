@@ -705,6 +705,70 @@ function runTests() {
   check('policy: a percentage still needs a number',
     policyOk('percent_of_income:') === false && policyOk('percent_of_income:abc') === false);
 
+  // ---- serve-time health: staleness and the trigger ------------------------
+  // Judged when a cached snapshot is served, because inside a refresh the snapshot is
+  // fresh by definition and a dead trigger runs no refresh to notice itself.
+  var stNow = new Date(2026, 8, 26, 12, 0, 0);
+  function stIds(ctx) {
+    return serveTimeHealth(ctx).map(function (f) { return f.id; });
+  }
+  function hoursAgo(h) { return new Date(stNow.getTime() - h * 3600000).toISOString(); }
+
+  check('serve: a fresh snapshot with a trigger raises nothing',
+    stIds({ now: stNow, generatedAt: hoursAgo(1), triggerInstalled: true,
+            refreshHours: 6 }).length === 0);
+  check('serve: F2 after more than two missed runs',
+    stIds({ now: stNow, generatedAt: hoursAgo(13), triggerInstalled: true,
+            refreshHours: 6 }).indexOf('F2') !== -1);
+  check('serve: exactly two intervals is not yet stale',
+    stIds({ now: stNow, generatedAt: hoursAgo(12), triggerInstalled: true,
+            refreshHours: 6 }).indexOf('F2') === -1);
+  check('serve: F2 detail says how old and how often it should run',
+    (function () {
+      var f = serveTimeHealth({ now: stNow, generatedAt: hoursAgo(72),
+        triggerInstalled: true, refreshHours: 6 })[0];
+      return f && f.id === 'F2' && f.detail.indexOf('3 day(s)') !== -1 &&
+        f.detail.indexOf('every 6 hour') !== -1;
+    })());
+  check('serve: F7 when the trigger is missing',
+    stIds({ now: stNow, generatedAt: hoursAgo(1), triggerInstalled: false,
+            refreshHours: 6 }).indexOf('F7') !== -1);
+  check('serve: F7 is an error, because nothing will ever refresh',
+    serveTimeHealth({ now: stNow, generatedAt: hoursAgo(1), triggerInstalled: false,
+      refreshHours: 6 })[0].severity === 'error');
+  // "Could not tell" must not read as "missing".
+  check('serve: an unknown trigger state raises nothing',
+    stIds({ now: stNow, generatedAt: hoursAgo(1), triggerInstalled: null,
+            refreshHours: 6 }).length === 0);
+  check('serve: both fire together, error before warning',
+    (function () {
+      var ids = stIds({ now: stNow, generatedAt: hoursAgo(100), triggerInstalled: false,
+        refreshHours: 6 });
+      return ids.length === 2 && ids[0] === 'F7' && ids[1] === 'F2';
+    })());
+  // A snapshot with an unreadable timestamp is a different problem; this check must
+  // neither crash the page nor cry wolf about it.
+  check('serve: an unreadable generatedAt raises no F2',
+    stIds({ now: stNow, generatedAt: 'not a date', triggerInstalled: true,
+            refreshHours: 6 }).length === 0 &&
+    stIds({ now: stNow, generatedAt: undefined, triggerInstalled: true,
+            refreshHours: 6 }).length === 0);
+  check('serve: falls back to the configured interval',
+    stIds({ now: stNow, generatedAt: hoursAgo(2 * CONFIG.REFRESH_TRIGGER_HOURS + 1),
+            triggerInstalled: true }).indexOf('F2') !== -1);
+
+  // A project lead must see these two: each one means their numbers are old.
+  var stSnap = { generatedAt: hoursAgo(1), projects: [], fundingSources: [],
+    breakdownRows: [], tracking: [], timeline: [],
+    health: serveTimeHealth({ now: stNow, generatedAt: hoursAgo(100),
+      triggerInstalled: false, refreshHours: 6 }) };
+  var stScoped = filterSnapshotForProjects_(stSnap, ['Spyfish Aotearoa']);
+  check('serve: scoped users still see F2 and F7',
+    stScoped.health.length === 2);
+
+  check('finding_ returns null for an id not in the catalogue',
+    finding_('ZZ9', {}) === null);
+
   Logger.log(results.join('\n'));
   return results;
 }

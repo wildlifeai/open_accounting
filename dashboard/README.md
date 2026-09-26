@@ -158,7 +158,9 @@ and open the returned `authUrl`. Approve the Wildlife.ai organisation. You shoul
 
 ### Step F — build the first snapshot and schedule refreshes
 Run `refreshSnapshot` once (this does the full crawl), then run `installRefreshTrigger` to
-schedule it every 6 hours.
+schedule it every 6 hours. If this step is skipped, or the trigger is later deleted, the
+Health tab raises **F7** on every page load; if the trigger exists but stops firing, **F2**
+says how old the snapshot is.
 
 ### Step G — deploy the web app
 **Deploy → New deployment → Web app.** Set *Execute as* = **Me**, *Who has access* =

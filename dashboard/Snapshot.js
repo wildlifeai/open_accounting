@@ -101,6 +101,21 @@ function readSnapshot_() {
   }
 }
 
+/**
+ * Whether the recurring refresh is scheduled, read at request time so it describes the
+ * trigger as it is now rather than as it was at the last refresh. Returns null when it
+ * cannot tell, and null must never be reported as missing: a false alarm sends somebody
+ * to reinstall a trigger that is fine.
+ */
+function refreshTriggerInstalled_() {
+  try {
+    return ScriptApp.getProjectTriggers()
+      .some(t => t.getHandlerFunction() === 'refreshSnapshot');
+  } catch (e) {
+    return null;
+  }
+}
+
 /** Install the recurring refresh trigger (idempotent). */
 function installRefreshTrigger() {
   ScriptApp.getProjectTriggers().forEach(t => {
